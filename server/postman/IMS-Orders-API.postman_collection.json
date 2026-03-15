@@ -1,0 +1,145 @@
+{
+  "info": {
+    "name": "IMS Orders API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Postman collection for testing IMS order APIs and stock reflection flows."
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000/api" },
+    { "key": "token", "value": "" },
+    { "key": "orderId", "value": "" },
+    { "key": "productId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"admin@gmail.com\",\n  \"password\": \"admin\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/login"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Login succeeded', function () { pm.response.to.have.status(200); });",
+              "const json = pm.response.json();",
+              "if (json.token) { pm.collectionVariables.set('token', json.token); }"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get All Orders",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": "{{baseUrl}}/orders?search=&status=all"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Orders fetched successfully', function () { pm.response.to.have.status(200); });",
+              "const json = pm.response.json();",
+              "pm.test('Response contains order array', function () { pm.expect(Array.isArray(json.data)).to.eql(true); });",
+              "if (json.data && json.data.length > 0) { pm.collectionVariables.set('orderId', json.data[0]._id); }"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get Order Details",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": "{{baseUrl}}/orders/{{orderId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Order details fetched successfully', function () { pm.response.to.have.status(200); });",
+              "const json = pm.response.json();",
+              "pm.test('Order contains items', function () { pm.expect(Array.isArray(json.data.items)).to.eql(true); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create Order",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customerName\": \"Postman Customer\",\n  \"customerEmail\": \"postman@example.com\",\n  \"customerPhone\": \"+1234567890\",\n  \"deliveryAddress\": \"Test Address\",\n  \"items\": [\n    {\n      \"product\": \"{{productId}}\",\n      \"quantity\": 1\n    }\n  ],\n  \"notes\": \"Created from Postman collection\"\n}"
+        },
+        "url": "{{baseUrl}}/orders/add"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Order created successfully', function () { pm.response.to.have.status(201); });",
+              "const json = pm.response.json();",
+              "if (json.data && json.data._id) { pm.collectionVariables.set('orderId', json.data._id); }"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Update Order Status",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"completed\"\n}"
+        },
+        "url": "{{baseUrl}}/orders/{{orderId}}/status"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Order status updated successfully', function () { pm.response.to.have.status(200); });",
+              "const json = pm.response.json();",
+              "pm.test('Status changed to completed', function () { pm.expect(json.data.status).to.eql('completed'); });"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
