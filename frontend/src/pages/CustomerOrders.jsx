@@ -100,6 +100,11 @@ const CustomerOrders = () => {
     ? orders
     : orders.filter((order) => order.status === statusFilter)
 
+  const getBillDateTime = (order) => {
+    const value = order?.billedAt || order?.createdAt || order?.orderDate
+    return value ? new Date(value) : null
+  }
+
   const pendingCount = orders.filter((o) => o.status === 'pending').length
   const processingCount = orders.filter((o) => o.status === 'processing').length
 
@@ -275,6 +280,9 @@ const CustomerOrders = () => {
                               day: 'numeric'
                             })}
                           </p>
+                          <p className="text-xs text-cyan-700 mt-1">
+                            Bill: {getBillDateTime(order)?.toLocaleDateString()} {getBillDateTime(order)?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </p>
                         </div>
                         <div className={`w-fit px-4 py-2 rounded-full flex items-center gap-2 ${getStatusColor(order.status)}`}>
                           {getStatusIcon(order.status)}
@@ -368,6 +376,9 @@ const CustomerOrders = () => {
                 <p className="text-sm">
                   Ordered on {new Date(selectedOrder.createdAt).toLocaleDateString()}
                 </p>
+                <p className="text-sm">
+                  Billed on {getBillDateTime(selectedOrder)?.toLocaleDateString()} at {getBillDateTime(selectedOrder)?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </p>
               </div>
             </div>
 
@@ -386,6 +397,16 @@ const CustomerOrders = () => {
               <div>
                 <p className="text-sm text-gray-600 uppercase">Total Amount</p>
                 <p className="text-lg font-bold text-cyan-700">${selectedOrder.totalAmount?.toFixed(2)}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600 uppercase">Bill Date & Time</p>
+                <p className="font-semibold text-cyan-700">
+                  {getBillDateTime(selectedOrder)?.toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  })} {getBillDateTime(selectedOrder)?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </p>
               </div>
             </div>
 

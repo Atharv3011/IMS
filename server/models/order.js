@@ -54,9 +54,34 @@ const orderSchema = new mongoose.Schema({
         required: [true, 'Delivery address is required']
     },
     items: [orderItemSchema],
+    itemTotal: {
+        type: Number,
+        required: true,
+        min: 0
+    },
+    outstandingAmountAtTime: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    totalBilled: {
+        type: Number,
+        required: true,
+        min: 0
+    },
     totalAmount: {
         type: Number,
         required: true,
+        min: 0
+    },
+    paymentStatus: {
+        type: String,
+        enum: ['unpaid', 'paid', 'partial'],
+        default: 'unpaid'
+    },
+    paidAmount: {
+        type: Number,
+        default: 0,
         min: 0
     },
     status: {
@@ -67,6 +92,10 @@ const orderSchema = new mongoose.Schema({
     orderDate: {
         type: Date,
         default: Date.now
+    },
+    billedAt: {
+        type: Date,
+        default: null
     },
     notes: {
         type: String,

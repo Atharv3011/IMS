@@ -54,6 +54,39 @@ const register = async () => {
 
         await newUser.save();
         console.log("Admin user seeded successfully");
+
+        // Add test customers
+        console.log('Creating test customers...');
+        const customerEmails = ['john@example.com', 'sarah@example.com', 'mike@example.com'];
+        const customerDetails = [
+            { name: "John Customer", email: 'john@example.com', phone: "+1 234 567 8901", company: "Customer Company A", outstanding: 250.50 },
+            { name: "Sarah Smith", email: 'sarah@example.com', phone: "+1 234 567 8902", company: "Customer Company B", outstanding: 0 },
+            { name: "Mike Johnson", email: 'mike@example.com', phone: "+1 234 567 8903", company: "Customer Company C", outstanding: 1250.75 }
+        ];
+        
+        for (const details of customerDetails) {
+            const existingCustomer = await user.findOne({ email: details.email });
+            if (!existingCustomer) {
+                const hashedPassword = await bcrypt.hash('password123', 10);
+                const newCustomer = new user({
+                    name: details.name,
+                    email: details.email,
+                    password: hashedPassword,
+                    address: "123 Main St, City, State",
+                    phone: details.phone,
+                    company: details.company,
+                    role: "customer",
+                    status: "active",
+                    outstandingAmount: details.outstanding
+                });
+                await newCustomer.save();
+                console.log(`Customer ${details.name} created successfully`);
+            } else {
+                console.log(`Customer ${details.email} already exists`);
+            }
+        }
+        
+        console.log("All seed operations completed successfully");
         await mongoose.connection.close();
         process.exit(0);
     } catch (error) {

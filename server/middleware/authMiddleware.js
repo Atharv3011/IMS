@@ -3,6 +3,13 @@ import User from '../models/user.js';
 
 const authMiddleware = async (req, res, next) => {
     try {
+        if (!process.env.JWT_SECRET) {
+            return res.status(500).json({
+                success: false,
+                message: 'Server configuration error: JWT secret is not set.'
+            });
+        }
+
         const token = req.headers.authorization?.split(' ')[1];
 
         if (!token) {

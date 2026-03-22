@@ -6,6 +6,10 @@ const productSchema = new mongoose.Schema({
         required: [true, 'Product name is required'],
         trim: true
     },
+    imageUrl: {
+        type: String,
+        default: ''
+    },
     description: {
         type: String,
         default: ''
@@ -38,7 +42,7 @@ const productSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['active', 'inactive', 'discontinued'],
+        enum: ['active', 'inactive', 'discontinued', 'archived'],
         default: 'active'
     }
 }, {

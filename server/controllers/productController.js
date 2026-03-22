@@ -2,7 +2,16 @@ import Product from '../models/product.js';
 
 export const getProducts = async (req, res) => {
     try {
-        const products = await Product.find()
+        const includeArchived = req.query.includeArchived === 'true';
+        const query = {};
+
+        if (req.user?.role === 'customer') {
+            query.status = 'active';
+        } else if (!includeArchived) {
+            query.status = { $ne: 'archived' };
+        }
+
+        const products = await Product.find(query)
             .populate('category', 'name')
             .populate('supplier', 'name contact')
             .sort({ createdAt: -1 });
@@ -24,6 +33,7 @@ export const getProducts = async (req, res) => {
 export const addProduct = async (req, res) => {
     try {
         const { name, description, category, supplier, price, stock, sku } = req.body;
+        const imageUrl = req.file ? `/uploads/products/${req.file.filename}` : '';
 
         if (!name || !category || !supplier || !price) {
             return res.status(400).json({ 
@@ -34,6 +44,7 @@ export const addProduct = async (req, res) => {
 
         const product = await Product.create({
             name,
+            imageUrl,
             description,
             category,
             supplier,
@@ -71,7 +82,11 @@ export const addProduct = async (req, res) => {
 export const updateProduct = async (req, res) => {
     try {
         const { id } = req.params;
-        const updateData = req.body;
+        const updateData = { ...req.body };
+
+        if (req.file) {
+            updateData.imageUrl = `/uploads/products/${req.file.filename}`;
+        }
 
         const product = await Product.findByIdAndUpdate(
             id,
@@ -124,6 +139,72 @@ export const deleteProduct = async (req, res) => {
         res.status(500).json({ 
             success: false, 
             message: 'Error deleting product' 
+        });
+    }
+};
+
+export const archiveProduct = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const product = await Product.findByIdAndUpdate(
+            id,
+            { status: 'archived' },
+            { new: true, runValidators: true }
+        )
+        .populate('category', 'name')
+        .populate('supplier', 'name contact');
+
+        if (!product) {
+            return res.status(404).json({
+                success: false,
+                message: 'Product not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Product archived successfully',
+            data: product
+        });
+    } catch (error) {
+        console.error('Archive product error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error archiving product'
+        });
+    }
+};
+
+export const unarchiveProduct = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const product = await Product.findByIdAndUpdate(
+            id,
+            { status: 'active' },
+            { new: true, runValidators: true }
+        )
+        .populate('category', 'name')
+        .populate('supplier', 'name contact');
+
+        if (!product) {
+            return res.status(404).json({
+                success: false,
+                message: 'Product not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Product unarchived successfully',
+            data: product
+        });
+    } catch (error) {
+        console.error('Unarchive product error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error unarchiving product'
         });
     }
 };

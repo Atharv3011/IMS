@@ -4,6 +4,13 @@ import User from '../models/user.js';
 
 export const login = async (req, res) => {
     try {
+        if (!process.env.JWT_SECRET) {
+            return res.status(500).json({
+                success: false,
+                message: 'Server configuration error: JWT secret is not set.'
+            });
+        }
+
         const { email, password } = req.body;
 
         if (!email || !password) {
@@ -67,6 +74,13 @@ export const login = async (req, res) => {
 
 export const register = async (req, res) => {
     try {
+        if (!process.env.JWT_SECRET) {
+            return res.status(500).json({
+                success: false,
+                message: 'Server configuration error: JWT secret is not set.'
+            });
+        }
+
         const { name, email, password, address, phone, company, role = 'customer' } = req.body;
 
         if (!name || !email || !password) {

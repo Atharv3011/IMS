@@ -1,5 +1,6 @@
 import Order from '../models/order.js';
 import Product from '../models/product.js';
+import User from '../models/user.js';
 import {
     notifyOrderCreated,
     notifyOrderStatusUpdated,
@@ -32,7 +33,7 @@ export const getOrders = async (req, res) => {
         }
         
         const orders = await Order.find(query)
-            .select('orderNumber customerId customerName customerEmail customerPhone deliveryAddress items totalAmount status orderDate notes createdAt')
+            .select('orderNumber customerId customerName customerEmail customerPhone deliveryAddress items itemTotal outstandingAmountAtTime totalBilled totalAmount paymentStatus paidAmount status orderDate billedAt notes createdAt')
             .sort({ createdAt: -1 })
             .lean();
 
@@ -55,7 +56,7 @@ export const getOrderById = async (req, res) => {
         const { id } = req.params;
 
         const order = await Order.findById(id)
-            .select('orderNumber customerId customerName customerEmail customerPhone deliveryAddress items totalAmount status orderDate notes createdAt')
+            .select('orderNumber customerId customerName customerEmail customerPhone deliveryAddress items itemTotal outstandingAmountAtTime totalBilled totalAmount paymentStatus paidAmount status orderDate billedAt notes createdAt')
             .lean();
 
         if (!order) {
@@ -88,6 +89,7 @@ export const getOrderById = async (req, res) => {
 export const createOrder = async (req, res) => {
     try {
         const { 
+            customerId,
             customerName, 
             customerEmail, 
             customerPhone, 
@@ -98,6 +100,7 @@ export const createOrder = async (req, res) => {
 
         console.log('=== Creating order ===');
         console.log('Creating order with data:', { 
+            customerId,
             customerName, 
             customerEmail, 
             customerPhone, 
@@ -116,7 +119,7 @@ export const createOrder = async (req, res) => {
         }
 
         // STEP 1: Validate all items and calculate total WITHOUT updating stock
-        let totalAmount = 0;
+        let itemTotal = 0;
         const orderItems = [];
         const products = [];
         const lowStockItems = [];
@@ -144,8 +147,8 @@ export const createOrder = async (req, res) => {
                 });
             }
 
-            const itemTotal = product.price * item.quantity;
-            totalAmount += itemTotal;
+            const lineTotal = product.price * item.quantity;
+            itemTotal += lineTotal;
 
             orderItems.push({
                 product: product._id,
@@ -165,18 +168,48 @@ export const createOrder = async (req, res) => {
         }
 
         console.log('STEP 1 Complete: All items validated');
-        console.log(`Total order amount: $${totalAmount}`);
+        console.log(`Total items amount: $${itemTotal}`);
+
+        // STEP 1.5: Fetch customer's outstanding amount if customerId is available
+        let outstandingAmountAtTime = 0;
+        let resolvedCustomerId = null;
+
+        if (customerId) {
+            const customer = await User.findOne({ _id: customerId, role: 'customer' });
+            if (!customer) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Selected customer not found'
+                });
+            }
+
+            resolvedCustomerId = customer._id;
+            outstandingAmountAtTime = customer.outstandingAmount || 0;
+            console.log(`Customer outstanding amount: $${outstandingAmountAtTime}`);
+        }
+        
+        const totalBilled = itemTotal + outstandingAmountAtTime;
+        const totalAmount = itemTotal; // totalAmount is just items, totalBilled includes outstanding
+        
+        console.log(`Outstanding amount at time: $${outstandingAmountAtTime}`);
+        console.log(`Total amount to be billed: $${totalBilled}`);
 
         // STEP 2: Create the order
         console.log('STEP 2: Creating order in database...');
         const order = await Order.create({
-            customerId: req.user ? req.user._id : null,
+            customerId: resolvedCustomerId,
             customerName,
             customerEmail,
             customerPhone,
             deliveryAddress,
             items: orderItems,
+            itemTotal,
+            outstandingAmountAtTime,
+            totalBilled,
             totalAmount,
+            paymentStatus: 'unpaid',
+            paidAmount: 0,
+            billedAt: new Date(),
             notes: notes || ''
         });
 
@@ -200,6 +233,16 @@ export const createOrder = async (req, res) => {
         }
 
         console.log('STEP 3 Complete: All stock updated');
+
+        // STEP 3.5: Update customer's outstanding amount
+        if (resolvedCustomerId) {
+            await User.findByIdAndUpdate(
+                resolvedCustomerId,
+                { outstandingAmount: totalBilled },
+                { new: true }
+            );
+            console.log(`✓ Customer outstanding amount updated to: $${totalBilled}`);
+        }
 
         // STEP 4: Return populated order
         console.log('STEP 4: Fetching populated order...');
@@ -270,7 +313,7 @@ export const updateOrderStatus = async (req, res) => {
         await order.save();
 
         const updatedOrder = await Order.findById(id)
-            .select('orderNumber customerId customerName customerEmail customerPhone deliveryAddress items totalAmount status orderDate notes createdAt')
+            .select('orderNumber customerId customerName customerEmail customerPhone deliveryAddress items itemTotal outstandingAmountAtTime totalBilled totalAmount paymentStatus paidAmount status orderDate notes createdAt')
             .lean();
 
         await notifyOrderStatusUpdated(updatedOrder);
@@ -285,6 +328,157 @@ export const updateOrderStatus = async (req, res) => {
         res.status(500).json({ 
             success: false, 
             message: 'Error updating order status' 
+        });
+    }
+};
+
+export const updateOrderBill = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const {
+            customerName,
+            customerEmail,
+            customerPhone,
+            deliveryAddress,
+            notes,
+            items
+        } = req.body;
+
+        if (!customerName || !customerEmail || !customerPhone || !deliveryAddress || !Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please provide valid bill details and at least one item'
+            });
+        }
+
+        const order = await Order.findById(id);
+        if (!order) {
+            return res.status(404).json({
+                success: false,
+                message: 'Order not found'
+            });
+        }
+
+        if (order.status === 'completed' || order.status === 'cancelled') {
+            return res.status(400).json({
+                success: false,
+                message: 'Completed or cancelled orders cannot be edited'
+            });
+        }
+
+        const previousQuantities = new Map();
+        for (const oldItem of order.items) {
+            const key = String(oldItem.product);
+            previousQuantities.set(key, (previousQuantities.get(key) || 0) + Number(oldItem.quantity || 0));
+        }
+
+        const requestedQuantities = new Map();
+        for (const item of items) {
+            if (!item.product || !item.quantity || Number(item.quantity) < 1) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Each bill item must have a valid product and quantity'
+                });
+            }
+
+            const key = String(item.product);
+            requestedQuantities.set(key, (requestedQuantities.get(key) || 0) + Number(item.quantity));
+        }
+
+        const allProductIds = new Set([
+            ...Array.from(previousQuantities.keys()),
+            ...Array.from(requestedQuantities.keys())
+        ]);
+
+        const productDocs = await Product.find({ _id: { $in: Array.from(allProductIds) } });
+        const productMap = new Map(productDocs.map((product) => [String(product._id), product]));
+
+        for (const [productId, requestedQty] of requestedQuantities.entries()) {
+            const product = productMap.get(productId);
+            if (!product) {
+                return res.status(404).json({
+                    success: false,
+                    message: `Product not found: ${productId}`
+                });
+            }
+
+            const previousQty = previousQuantities.get(productId) || 0;
+            const availableForThisOrder = Number(product.stock) + previousQty;
+            if (requestedQty > availableForThisOrder) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Insufficient stock for ${product.name}. Available: ${availableForThisOrder}`
+                });
+            }
+        }
+
+        const updatedItems = [];
+        let itemTotal = 0;
+        for (const item of items) {
+            const product = productMap.get(String(item.product));
+            const quantity = Number(item.quantity);
+            const lineTotal = Number(product.price) * quantity;
+            itemTotal += lineTotal;
+
+            updatedItems.push({
+                product: product._id,
+                productName: product.name,
+                quantity,
+                price: product.price
+            });
+        }
+
+        for (const productId of allProductIds) {
+            const product = productMap.get(productId);
+            if (!product) {
+                continue;
+            }
+            const previousQty = previousQuantities.get(productId) || 0;
+            const requestedQty = requestedQuantities.get(productId) || 0;
+            product.stock = Number(product.stock) + previousQty - requestedQty;
+            await product.save();
+        }
+
+        const oldTotalBilled = Number(order.totalBilled || order.totalAmount || 0);
+        const outstandingAmountAtTime = Number(order.outstandingAmountAtTime || 0);
+        const totalBilled = itemTotal + outstandingAmountAtTime;
+
+        order.customerName = customerName.trim();
+        order.customerEmail = customerEmail.trim().toLowerCase();
+        order.customerPhone = customerPhone.trim();
+        order.deliveryAddress = deliveryAddress.trim();
+        order.notes = (notes || '').trim();
+        order.items = updatedItems;
+        order.itemTotal = itemTotal;
+        order.totalAmount = itemTotal;
+        order.totalBilled = totalBilled;
+        order.billedAt = new Date();
+
+        await order.save();
+
+        if (order.customerId) {
+            const delta = totalBilled - oldTotalBilled;
+            if (delta !== 0) {
+                await User.findByIdAndUpdate(order.customerId, {
+                    $inc: { outstandingAmount: delta }
+                });
+            }
+        }
+
+        const updatedOrder = await Order.findById(order._id)
+            .select('orderNumber customerId customerName customerEmail customerPhone deliveryAddress items itemTotal outstandingAmountAtTime totalBilled totalAmount paymentStatus paidAmount status orderDate billedAt notes createdAt')
+            .lean();
+
+        res.json({
+            success: true,
+            message: 'Bill updated successfully',
+            data: updatedOrder
+        });
+    } catch (error) {
+        console.error('Update order bill error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error updating bill'
         });
     }
 };
@@ -324,6 +518,27 @@ export const deleteOrder = async (req, res) => {
         res.status(500).json({ 
             success: false, 
             message: 'Error deleting order' 
+        });
+    }
+};
+
+export const getCustomersForBilling = async (req, res) => {
+    try {
+        const customers = await User.find({ role: 'customer', status: 'active' })
+            .select('_id name email phone outstandingAmount')
+            .sort({ name: 1 })
+            .lean();
+
+        res.json({
+            success: true,
+            count: customers.length,
+            data: customers
+        });
+    } catch (error) {
+        console.error('Get customers error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error fetching customers' 
         });
     }
 };

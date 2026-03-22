@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { useState, useEffect } from 'react'
 import { Plus, Search, Eye, CheckCircle, XCircle, Clock, Package, Loader } from 'lucide-react'
-import axios, { API_URL } from '../utils/api'
+import axios, { API_URL, buildApiUrl } from '../utils/api'
 import AnimatedCard from '../components/AnimatedCard'
 import AnimatedButton from '../components/AnimatedButton'
 import AnimatedModal from '../components/AnimatedModal'
@@ -14,11 +14,13 @@ const Orders = () => {
   const [statusFilter, setStatusFilter] = useState('all')
   const [orders, setOrders] = useState([])
   const [products, setProducts] = useState([])
+  const [customers, setCustomers] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   
   // Form state
   const [formData, setFormData] = useState({
+    customerId: '',
     customerName: '',
     customerEmail: '',
     customerPhone: '',
@@ -26,6 +28,16 @@ const Orders = () => {
     notes: ''
   })
   const [selectedProducts, setSelectedProducts] = useState([])
+  const [selectedCustomer, setSelectedCustomer] = useState(null)
+  const [isEditingBill, setIsEditingBill] = useState(false)
+  const [editBillData, setEditBillData] = useState({
+    customerName: '',
+    customerEmail: '',
+    customerPhone: '',
+    deliveryAddress: '',
+    notes: '',
+    items: []
+  })
 
   const formatCurrency = (amount) => `$${Number(amount || 0).toFixed(2)}`
 
@@ -53,6 +65,62 @@ const Orders = () => {
 
     return () => clearInterval(interval)
   }, [])
+
+  useEffect(() => {
+    if (showModal) {
+      fetchCustomers()
+    }
+  }, [showModal])
+
+  const fetchCustomers = async () => {
+    try {
+      const token = localStorage.getItem('token')
+      let customerData = []
+
+      try {
+        const response = await axios.get(`${API_URL}/users/customers`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        customerData = response.data.data || []
+      } catch (primaryError) {
+        const fallback = await axios.get(`${API_URL}/orders/customers/billing`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        customerData = fallback.data.data || []
+      }
+
+      setCustomers(customerData)
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to fetch customers')
+      console.error('Fetch customers error:', err)
+    }
+  }
+
+  const handleSelectCustomer = (customerId) => {
+    const customer = customers.find(c => c._id === customerId)
+    if (customer) {
+      setSelectedCustomer(customer)
+      setFormData({
+        ...formData,
+        customerId: customer._id,
+        customerName: customer.name,
+        customerEmail: customer.email,
+        customerPhone: customer.phone
+      })
+    }
+  }
+
+  const handleClearCustomer = () => {
+    setSelectedCustomer(null)
+    setFormData({
+      customerId: '',
+      customerName: '',
+      customerEmail: '',
+      customerPhone: '',
+      deliveryAddress: '',
+      notes: ''
+    })
+  }
 
   const fetchOrders = async (silent = false) => {
     try {
@@ -139,7 +207,10 @@ const Orders = () => {
     }).join('')
 
     const orderDate = new Date(order.createdAt || order.orderDate)
-    const totalAmount = formatCurrency(order.totalAmount)
+    const billDate = new Date(order.billedAt || order.createdAt || order.orderDate)
+    const itemTotal = formatCurrency(order.itemTotal || order.totalAmount)
+    const outstandingAmount = formatCurrency(order.outstandingAmountAtTime || 0)
+    const totalBilled = formatCurrency(order.totalBilled || order.totalAmount)
 
     printWindow.document.write(`
       <html>
@@ -168,6 +239,8 @@ const Orders = () => {
               <div style="font-weight: 700; font-size: 18px;">${order.orderNumber}</div>
               <div class="muted" style="margin-top: 6px;">Order Date</div>
               <div>${orderDate.toLocaleDateString()}</div>
+              <div class="muted" style="margin-top: 6px;">Bill Date & Time</div>
+              <div>${billDate.toLocaleDateString()} ${billDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
               <div class="muted" style="margin-top: 6px;">Status</div>
               <div style="text-transform: uppercase;">${order.status}</div>
             </div>
@@ -197,8 +270,14 @@ const Orders = () => {
                   ${itemsHtml}
                 </tbody>
               </table>
-              <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
-                <div class="total">Total Amount: ${totalAmount}</div>
+              <div style="display: flex; justify-content: flex-end; margin-top: 12px; flex-direction: column; align-items: flex-end; gap: 8px;">
+                <div style="font-size: 16px;">Order Items Total: ${itemTotal}</div>
+                ${Number(order.outstandingAmountAtTime || 0) > 0 ? `
+                  <div style="font-size: 14px; color: #d97706;">Previous Outstanding: ${outstandingAmount}</div>
+                  <div class="total" style="border-top: 2px solid #e5e7eb; padding-top: 8px;">Total Billed Amount: ${totalBilled}</div>
+                ` : `
+                  <div class="total">Total Amount: ${itemTotal}</div>
+                `}
               </div>
             </div>
           </div>
@@ -248,6 +327,7 @@ const Orders = () => {
       setLoading(true)
       const token = localStorage.getItem('token')
       const orderData = {
+        customerId: formData.customerId || undefined,
         customerName: formData.customerName.trim(),
         customerEmail: formData.customerEmail.trim(),
         customerPhone: formData.customerPhone.trim(),
@@ -337,7 +417,126 @@ const Orders = () => {
 
   const viewOrderDetails = (order) => {
     setSelectedOrder(order)
+    setIsEditingBill(false)
+    setEditBillData({
+      customerName: order.customerName || '',
+      customerEmail: order.customerEmail || '',
+      customerPhone: order.customerPhone || '',
+      deliveryAddress: order.deliveryAddress || '',
+      notes: order.notes || '',
+      items: (order.items || []).map((item) => ({
+        product: item.product?._id || item.product,
+        productName: item.productName,
+        quantity: Number(item.quantity || 1),
+        price: Number(item.price || 0)
+      }))
+    })
     setShowDetailsModal(true)
+  }
+
+  const handleEditBillInputChange = (e) => {
+    setEditBillData((prev) => ({
+      ...prev,
+      [e.target.name]: e.target.value
+    }))
+  }
+
+  const handleEditBillQuantityChange = (productId, quantity) => {
+    const parsedQty = Math.max(1, parseInt(quantity || 1, 10))
+    setEditBillData((prev) => ({
+      ...prev,
+      items: prev.items.map((item) =>
+        String(item.product) === String(productId)
+          ? { ...item, quantity: parsedQty }
+          : item
+      )
+    }))
+  }
+
+  const removeEditBillItem = (productId) => {
+    setEditBillData((prev) => ({
+      ...prev,
+      items: prev.items.filter((item) => String(item.product) !== String(productId))
+    }))
+  }
+
+  const addProductToEditBill = (productId) => {
+    const product = products.find((p) => p._id === productId)
+    if (!product) return
+
+    setEditBillData((prev) => {
+      if (prev.items.find((item) => String(item.product) === String(productId))) {
+        return prev
+      }
+
+      return {
+        ...prev,
+        items: [
+          ...prev.items,
+          {
+            product: product._id,
+            productName: product.name,
+            quantity: 1,
+            price: Number(product.price || 0)
+          }
+        ]
+      }
+    })
+  }
+
+  const handleSaveBill = async () => {
+    if (!selectedOrder) return
+
+    if (!editBillData.customerName.trim() || !editBillData.customerEmail.trim() || !editBillData.customerPhone.trim() || !editBillData.deliveryAddress.trim()) {
+      setError('All customer and delivery fields are required')
+      return
+    }
+
+    if (!editBillData.items.length) {
+      setError('Please keep at least one item in bill')
+      return
+    }
+
+    try {
+      setLoading(true)
+      const token = localStorage.getItem('token')
+      const payload = {
+        customerName: editBillData.customerName.trim(),
+        customerEmail: editBillData.customerEmail.trim(),
+        customerPhone: editBillData.customerPhone.trim(),
+        deliveryAddress: editBillData.deliveryAddress.trim(),
+        notes: editBillData.notes.trim(),
+        items: editBillData.items.map((item) => ({
+          product: item.product,
+          quantity: Number(item.quantity)
+        }))
+      }
+
+      let response
+      try {
+        response = await axios.put(buildApiUrl(`/orders/${selectedOrder._id}/bill`), payload, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+      } catch (primaryError) {
+        response = await axios.put(`/api/orders/${selectedOrder._id}/bill`, payload, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+      }
+
+      const updatedOrder = response.data.data
+      setSelectedOrder(updatedOrder)
+      setOrders((prev) => prev.map((order) => (order._id === updatedOrder._id ? updatedOrder : order)))
+      setIsEditingBill(false)
+      setError('')
+    } catch (err) {
+      const status = err.response?.status
+      const backendMessage = err.response?.data?.message
+      const requestUrl = err.config?.url
+      setError(backendMessage || `Failed to update bill${status ? ` (HTTP ${status})` : ''}${requestUrl ? ` at ${requestUrl}` : ''}`)
+      console.error('Update bill error:', err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -426,6 +625,7 @@ const Orders = () => {
                   <th className="px-4 py-3 text-left font-semibold text-gray-700">Product Name</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-700">Quantity</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-700">Order Date</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-700">Bill Date</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-700">Order Status</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-700">Total</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-700">Actions</th>
@@ -434,7 +634,7 @@ const Orders = () => {
               <tbody>
                 {filteredOrders.length === 0 ? (
                   <tr>
-                    <td colSpan="8" className="py-8 text-center text-gray-500">
+                    <td colSpan="9" className="py-8 text-center text-gray-500">
                       No orders found
                     </td>
                   </tr>
@@ -475,6 +675,16 @@ const Orders = () => {
                       <td className="px-4 py-4 align-top text-gray-600">
                         {new Date(order.orderDate || order.createdAt).toLocaleDateString()}
                       </td>
+                      <td className="px-4 py-4 align-top text-gray-600">
+                        {order.billedAt ? (
+                          <div className="text-sm">
+                            <p className="font-medium text-blue-700">{new Date(order.billedAt).toLocaleDateString()}</p>
+                            <p className="text-xs text-gray-500">{new Date(order.billedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-sm">Not billed</span>
+                        )}
+                      </td>
                       <td className="px-4 py-4 align-top">
                         <motion.span 
                           className={`px-3 py-1 rounded-full text-xs font-semibold uppercase flex items-center gap-1 w-fit ${getStatusColor(order.status)}`}
@@ -486,7 +696,19 @@ const Orders = () => {
                       </td>
                       <td className="px-4 py-4 align-top">
                         <div>
-                          <p className="font-bold text-gray-800">${order.totalAmount.toLocaleString()}</p>
+                          <p className="font-bold text-gray-800">
+                            ${Number((order.totalBilled ?? order.totalAmount) || 0).toLocaleString()}
+                          </p>
+                          {Number(order.outstandingAmountAtTime || 0) > 0 && (
+                            <>
+                              <p className="text-xs text-amber-700">
+                                Bill: ${Number(order.totalAmount || 0).toLocaleString()}
+                              </p>
+                              <p className="text-xs text-amber-700">
+                                Outstanding: ${Number(order.outstandingAmountAtTime || 0).toLocaleString()}
+                              </p>
+                            </>
+                          )}
                           <p className="text-sm text-gray-500">
                             {order.customerId ? 'Customer order' : 'Manual order'}
                           </p>
@@ -515,10 +737,54 @@ const Orders = () => {
       {/* Add Order Modal */}
       <AnimatedModal
         isOpen={showModal}
-        onClose={() => setShowModal(false)}
+        onClose={() => {
+          setShowModal(false)
+          handleClearCustomer()
+          setSelectedProducts([])
+          setError('')
+        }}
         title="Create New Order"
+        size="lg"
       >
         <form onSubmit={handleCreateOrder} className="space-y-4">
+          {/* Customer Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Select Existing Customer
+            </label>
+            <select 
+              onChange={(e) => handleSelectCustomer(e.target.value)}
+              value={selectedCustomer?._id || ''}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              <option value="">-- Select a customer --</option>
+              {customers.map(customer => (
+                <option key={customer._id} value={customer._id}>
+                  {customer.name} ({customer.outstandingAmount > 0 ? `Outstanding: $${customer.outstandingAmount.toFixed(2)}` : 'Paid'})
+                </option>
+              ))}
+            </select>
+            {selectedCustomer && (
+              <button
+                type="button"
+                onClick={handleClearCustomer}
+                className="mt-2 text-sm text-purple-600 hover:text-purple-800"
+              >
+                Clear selection
+              </button>
+            )}
+          </div>
+
+          {/* Show Outstanding Amount if customer has previous balance */}
+          {selectedCustomer && selectedCustomer.outstandingAmount > 0 && (
+            <div className="bg-amber-50 border border-amber-200 p-4 rounded-lg">
+              <p className="text-sm text-amber-700">
+                <span className="font-semibold">Outstanding Balance:</span> ${selectedCustomer.outstandingAmount.toFixed(2)}
+              </p>
+              <p className="text-xs text-amber-600 mt-1">This will be added to the current order total in the bill.</p>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Customer Name
@@ -621,8 +887,23 @@ const Orders = () => {
                   </button>
                 </div>
               ))}
-              <div className="text-right font-bold">
-                Total: ${selectedProducts.reduce((sum, item) => sum + (item.price * item.quantity), 0).toFixed(2)}
+              <div className="p-3 bg-purple-50 rounded-lg space-y-2">
+                <div className="flex justify-between font-semibold">
+                  <span>Order Items Total:</span>
+                  <span className="text-purple-600">${selectedProducts.reduce((sum, item) => sum + (item.price * item.quantity), 0).toFixed(2)}</span>
+                </div>
+                {selectedCustomer && selectedCustomer.outstandingAmount > 0 && (
+                  <>
+                    <div className="flex justify-between text-sm text-amber-700">
+                      <span>Previous Outstanding:</span>
+                      <span>${selectedCustomer.outstandingAmount.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between font-bold border-t border-purple-200 pt-2 text-amber-700">
+                      <span>Total to be Billed:</span>
+                      <span>${(selectedProducts.reduce((sum, item) => sum + (item.price * item.quantity), 0) + selectedCustomer.outstandingAmount).toFixed(2)}</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -662,6 +943,7 @@ const Orders = () => {
         isOpen={showDetailsModal}
         onClose={() => setShowDetailsModal(false)}
         title="Order Details"
+        size="lg"
       >
         {selectedOrder && (
           <div className="space-y-4">
@@ -673,9 +955,37 @@ const Orders = () => {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Customer</p>
-                <p className="font-semibold text-gray-800">{selectedOrder.customerName}</p>
-                <p className="text-sm text-gray-500">{selectedOrder.customerEmail}</p>
-                <p className="text-sm text-gray-500">{selectedOrder.customerPhone}</p>
+                {isEditingBill ? (
+                  <div className="space-y-2">
+                    <input
+                      name="customerName"
+                      value={editBillData.customerName}
+                      onChange={handleEditBillInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      placeholder="Customer name"
+                    />
+                    <input
+                      name="customerEmail"
+                      value={editBillData.customerEmail}
+                      onChange={handleEditBillInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      placeholder="Customer email"
+                    />
+                    <input
+                      name="customerPhone"
+                      value={editBillData.customerPhone}
+                      onChange={handleEditBillInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      placeholder="Customer phone"
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <p className="font-semibold text-gray-800">{selectedOrder.customerName}</p>
+                    <p className="text-sm text-gray-500">{selectedOrder.customerEmail}</p>
+                    <p className="text-sm text-gray-500">{selectedOrder.customerPhone}</p>
+                  </>
+                )}
               </div>
               <div>
                 <p className="text-sm text-gray-600 mb-1">Status</p>
@@ -701,41 +1011,188 @@ const Orders = () => {
               </div>
             </div>
 
+            {selectedOrder.billedAt && (
+              <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+                <p className="text-sm text-blue-600 mb-1">Bill Date & Time</p>
+                <p className="font-semibold text-blue-900">
+                  {new Date(selectedOrder.billedAt).toLocaleDateString()} at {new Date(selectedOrder.billedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              </div>
+            )}
+
             <div>
               <p className="text-sm text-gray-600 mb-1">Delivery Address</p>
-              <p className="text-gray-800">{selectedOrder.deliveryAddress}</p>
+              {isEditingBill ? (
+                <textarea
+                  name="deliveryAddress"
+                  value={editBillData.deliveryAddress}
+                  onChange={handleEditBillInputChange}
+                  rows="3"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              ) : (
+                <p className="text-gray-800">{selectedOrder.deliveryAddress}</p>
+              )}
             </div>
 
             <div>
               <p className="text-sm font-semibold text-gray-700 mb-2">Order Items</p>
+              {isEditingBill && (
+                <div className="mb-3">
+                  <select
+                    onChange={(e) => {
+                      addProductToEditBill(e.target.value)
+                      e.target.value = ''
+                    }}
+                    defaultValue=""
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="">-- Add product to bill --</option>
+                    {products.map((product) => (
+                      <option key={product._id} value={product._id}>
+                        {product.name} - ${product.price} (Stock: {product.stock})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="space-y-2">
-                {selectedOrder.items.map((item, index) => (
-                  <div key={index} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                    <div>
+                {(isEditingBill ? editBillData.items : selectedOrder.items).map((item, index) => (
+                  <div key={`${item.product || item.productName}-${index}`} className="flex justify-between items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                    <div className="flex-1">
                       <p className="font-medium text-gray-800">{item.productName}</p>
-                      <p className="text-sm text-gray-500">Quantity: {item.quantity}</p>
+                      {isEditingBill ? (
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className="text-sm text-gray-500">Qty</span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={item.quantity}
+                            onChange={(e) => handleEditBillQuantityChange(item.product, e.target.value)}
+                            className="w-20 px-2 py-1 border border-gray-300 rounded"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeEditBillItem(item.product)}
+                            className="text-red-600 hover:text-red-800 text-sm"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-500">Quantity: {item.quantity}</p>
+                      )}
                     </div>
-                    <p className="font-semibold text-gray-800">${(item.price * item.quantity).toFixed(2)}</p>
+                    <p className="font-semibold text-gray-800">${(Number(item.price || 0) * Number(item.quantity || 0)).toFixed(2)}</p>
                   </div>
                 ))}
               </div>
             </div>
 
-            {selectedOrder.notes && (
+            {(isEditingBill || selectedOrder.notes) && (
               <div>
                 <p className="text-sm text-gray-600 mb-1">Notes</p>
-                <p className="text-gray-800">{selectedOrder.notes}</p>
+                {isEditingBill ? (
+                  <textarea
+                    name="notes"
+                    value={editBillData.notes}
+                    onChange={handleEditBillInputChange}
+                    rows="2"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                ) : (
+                  <p className="text-gray-800">{selectedOrder.notes}</p>
+                )}
               </div>
             )}
 
             <div className="border-t pt-4">
               <div className="flex justify-between items-center">
                 <span className="text-lg font-semibold text-gray-800">Total Amount</span>
-                <span className="text-2xl font-bold text-purple-600">${selectedOrder.totalAmount.toLocaleString()}</span>
+                <span className="text-2xl font-bold text-purple-600">
+                  {isEditingBill
+                    ? formatCurrency(editBillData.items.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 0)), 0))
+                    : `$${selectedOrder.totalAmount.toLocaleString()}`}
+                </span>
               </div>
+              {selectedOrder.outstandingAmountAtTime > 0 && (
+                <div className="mt-3 bg-amber-50 p-3 rounded-lg">
+                  <p className="text-sm text-amber-700 mb-2">
+                    <span className="font-semibold">Billing Breakdown:</span>
+                  </p>
+                  <div className="text-sm space-y-1 mb-2">
+                    <div className="flex justify-between text-amber-700">
+                      <span>Order Items:</span>
+                      <span>
+                        {isEditingBill
+                          ? formatCurrency(editBillData.items.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 0)), 0))
+                          : `$${selectedOrder.itemTotal?.toFixed(2) || selectedOrder.totalAmount.toFixed(2)}`}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-amber-700">
+                      <span>Previous Outstanding:</span>
+                      <span>${selectedOrder.outstandingAmountAtTime.toFixed(2)}</span>
+                    </div>
+                  </div>
+                  <div className="flex justify-between font-bold text-amber-900 border-t border-amber-200 pt-2">
+                    <span>Total to be Billed:</span>
+                    <span>
+                      {isEditingBill
+                        ? formatCurrency(
+                          editBillData.items.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 0)), 0) +
+                          Number(selectedOrder.outstandingAmountAtTime || 0)
+                        )
+                        : `$${selectedOrder.totalBilled?.toFixed(2) || selectedOrder.totalAmount.toFixed(2)}`}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3 mt-6">
+              {!isEditingBill && selectedOrder.status !== 'completed' && selectedOrder.status !== 'cancelled' && (
+                <AnimatedButton
+                  variant="secondary"
+                  className="flex-1 justify-center"
+                  onClick={() => setIsEditingBill(true)}
+                >
+                  Edit Bill
+                </AnimatedButton>
+              )}
+              {isEditingBill && (
+                <>
+                  <AnimatedButton
+                    variant="success"
+                    className="flex-1 justify-center"
+                    onClick={handleSaveBill}
+                    disabled={loading}
+                  >
+                    {loading ? 'Saving...' : 'Save Bill'}
+                  </AnimatedButton>
+                  <AnimatedButton
+                    variant="secondary"
+                    className="flex-1 justify-center"
+                    onClick={() => {
+                      setIsEditingBill(false)
+                      setEditBillData({
+                        customerName: selectedOrder.customerName || '',
+                        customerEmail: selectedOrder.customerEmail || '',
+                        customerPhone: selectedOrder.customerPhone || '',
+                        deliveryAddress: selectedOrder.deliveryAddress || '',
+                        notes: selectedOrder.notes || '',
+                        items: (selectedOrder.items || []).map((item) => ({
+                          product: item.product?._id || item.product,
+                          productName: item.productName,
+                          quantity: Number(item.quantity || 1),
+                          price: Number(item.price || 0)
+                        }))
+                      })
+                    }}
+                  >
+                    Cancel Edit
+                  </AnimatedButton>
+                </>
+              )}
               <AnimatedButton
                 variant="secondary"
                 className="flex-1 justify-center"
@@ -743,7 +1200,7 @@ const Orders = () => {
               >
                 Print Bill
               </AnimatedButton>
-              {selectedOrder.status !== 'completed' && selectedOrder.status !== 'cancelled' && (
+              {!isEditingBill && selectedOrder.status !== 'completed' && selectedOrder.status !== 'cancelled' && (
                 <AnimatedButton 
                   variant="success" 
                   className="flex-1 justify-center"
@@ -753,7 +1210,7 @@ const Orders = () => {
                   Mark as Completed
                 </AnimatedButton>
               )}
-              {selectedOrder.status !== 'cancelled' && selectedOrder.status !== 'completed' && (
+              {!isEditingBill && selectedOrder.status !== 'cancelled' && selectedOrder.status !== 'completed' && (
                 <AnimatedButton 
                   variant="danger" 
                   className="flex-1 justify-center"

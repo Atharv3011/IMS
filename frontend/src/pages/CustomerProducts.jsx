@@ -12,13 +12,20 @@ import {
   ArrowRight,
   Package
 } from 'lucide-react'
-import axios, { API_URL } from '../utils/api'
+import axios, { API_URL, BACKEND_ORIGIN } from '../utils/api'
 import { useNavigate } from 'react-router-dom'
 import AnimatedButton from '../components/AnimatedButton'
 import AnimatedCard from '../components/AnimatedCard'
 import { useAuth } from '../context/AuthContext'
 
 const CustomerProducts = () => {
+  const resolveImageUrl = (value) => {
+    if (!value) return ''
+    if (value.startsWith('http://') || value.startsWith('https://')) return value
+    const normalizedPath = value.startsWith('/') ? value : `/${value}`
+    return BACKEND_ORIGIN ? `${BACKEND_ORIGIN}${normalizedPath}` : normalizedPath
+  }
+
   const [products, setProducts] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(false)
@@ -39,6 +46,13 @@ const CustomerProducts = () => {
     }
     fetchProducts()
   }, [user])
+
+  useEffect(() => {
+    document.body.style.overflow = showCart ? 'hidden' : ''
+    return () => {
+      document.body.style.overflow = ''
+    }
+  }, [showCart])
 
   const fetchProducts = async () => {
     try {
@@ -88,6 +102,11 @@ const CustomerProducts = () => {
 
   const removeFromCart = (productId) => {
     setCart(cart.filter(item => item._id !== productId))
+  }
+
+  const getCartQuantity = (productId) => {
+    const item = cart.find((cartItem) => cartItem._id === productId)
+    return item ? item.quantity : 0
   }
 
   const calculateTotal = () => {
@@ -281,137 +300,191 @@ const CustomerProducts = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Products List */}
-          <div className="lg:col-span-3">
-            <motion.div
-              className="mb-6"
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-            >
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-                <input
-                  type="text"
-                  placeholder="Search by product name or description..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                />
-              </div>
-            </motion.div>
-
-            {/* Error Message */}
-            {error && (
-              <motion.div
-                className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg mb-6 flex items-center gap-2"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-              >
-                <AlertCircle size={20} />
-                {error}
-              </motion.div>
-            )}
-
-            {/* Products Grid */}
-            {loading ? (
-              <div className="flex justify-center items-center h-64">
-                <Loader className="animate-spin text-cyan-600" size={40} />
-              </div>
-            ) : filteredProducts.length === 0 ? (
-              <div className="text-center py-12 bg-white rounded-xl shadow-md">
-                <p className="text-gray-600 text-lg">No products found</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {filteredProducts.map((product, index) => (
-                  <AnimatedCard key={product._id} index={index}>
-                    <div className="bg-white rounded-xl shadow-md p-6 h-full flex flex-col">
-                      <div className="flex-grow">
-                        <h3 className="text-lg font-semibold text-gray-800 mb-2">{product.name}</h3>
-                        <p className="text-gray-600 text-sm mb-4">{product.description}</p>
-                        <div className="mb-4">
-                          <p className="text-sm text-gray-600">Category: <span className="font-medium">{product.category?.name || 'N/A'}</span></p>
-                          <p className="text-sm text-gray-600">Supplier: <span className="font-medium">{product.supplier?.name || 'N/A'}</span></p>
-                        </div>
-                      </div>
-
-                      <div className="border-t pt-4">
-                        <div className="flex justify-between items-center mb-4">
-                          <div>
-                            <p className="text-2xl font-bold text-cyan-700">${product.price?.toFixed(2) || '0.00'}</p>
-                            <p className={`text-sm ${product.stock > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              Stock: {product.stock}
-                            </p>
-                          </div>
-                        </div>
-                        <AnimatedButton
-                          onClick={() => addToCart(product)}
-                          disabled={product.stock === 0}
-                          className={`w-full min-h-11 py-2 rounded-lg font-semibold transition-all ${
-                            product.stock === 0
-                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                              : 'bg-cyan-600 text-white hover:bg-cyan-700'
-                          }`}
-                        >
-                          {product.stock === 0 ? 'Out of Stock' : 'Add to Cart'}
-                        </AnimatedButton>
-                      </div>
-                    </div>
-                  </AnimatedCard>
-                ))}
-              </div>
-            )}
+        <motion.div
+          className="mb-6"
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+            <input
+              type="text"
+              placeholder="Search by product name or description..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+            />
           </div>
+        </motion.div>
 
-          {/* Cart Sidebar */}
-          {showCart && (
-            <motion.div
-              className="fixed inset-0 z-40 bg-black/30 p-4 lg:col-span-1 lg:static lg:z-auto lg:bg-transparent lg:p-0"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              <div className="ml-auto h-full w-full max-w-md overflow-y-auto bg-white rounded-xl shadow-lg p-5 sm:p-6 lg:sticky lg:top-24 lg:h-auto lg:max-w-none">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-bold text-gray-800">Shopping Cart</h2>
-                  <div className="flex items-center gap-2">
-                    <div className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
-                      <Package size={14} />
-                      {totalCartQuantity} item(s)
+        {/* Error Message */}
+        {error && (
+          <motion.div
+            className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg mb-6 flex items-center gap-2"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+          >
+            <AlertCircle size={20} />
+            {error}
+          </motion.div>
+        )}
+
+        {/* Products Grid */}
+        {loading ? (
+          <div className="flex justify-center items-center h-64">
+            <Loader className="animate-spin text-cyan-600" size={40} />
+          </div>
+        ) : filteredProducts.length === 0 ? (
+          <div className="text-center py-12 bg-white rounded-xl shadow-md">
+            <p className="text-gray-600 text-lg">No products found</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {filteredProducts.map((product, index) => (
+              <AnimatedCard key={product._id} index={index}>
+                <div className="bg-white rounded-xl shadow-md p-6 h-full flex flex-col">
+                  <div className="flex-grow">
+                    <div className="mb-4">
+                      {product.imageUrl ? (
+                        <img
+                          src={resolveImageUrl(product.imageUrl)}
+                          alt={product.name}
+                          className="w-full h-44 object-cover rounded-lg border border-gray-200"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none'
+                          }}
+                        />
+                      ) : (
+                        <div className="w-full h-44 rounded-lg bg-gradient-to-br from-cyan-100 to-indigo-100 border border-gray-200 flex items-center justify-center">
+                          <Package className="text-cyan-700" size={38} />
+                        </div>
+                      )}
                     </div>
-                    <button
-                      onClick={() => setShowCart(false)}
-                      className="inline-flex min-h-10 items-center rounded-lg bg-gray-200 px-3 text-sm font-semibold text-gray-700 hover:bg-gray-300"
-                    >
-                      Close
-                    </button>
+                    <h3 className="text-lg font-semibold text-gray-800 mb-2">{product.name}</h3>
+                    <p className="text-gray-600 text-sm mb-4">{product.description}</p>
+                    <div className="mb-4">
+                      <p className="text-sm text-gray-600">Category: <span className="font-medium">{product.category?.name || 'N/A'}</span></p>
+                      <p className="text-sm text-gray-600">Supplier: <span className="font-medium">{product.supplier?.name || 'N/A'}</span></p>
+                    </div>
+                  </div>
+
+                  <div className="border-t pt-4">
+                    <div className="flex justify-between items-center mb-4">
+                      <div>
+                        <p className="text-2xl font-bold text-cyan-700">${product.price?.toFixed(2) || '0.00'}</p>
+                        <p className={`text-sm ${product.stock > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          Stock: {product.stock}
+                        </p>
+                      </div>
+                    </div>
+                    {getCartQuantity(product._id) > 0 ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            onClick={() => updateQuantity(product._id, getCartQuantity(product._id) - 1)}
+                            className="inline-flex min-h-10 min-w-10 items-center justify-center bg-gray-200 rounded-lg hover:bg-gray-300"
+                          >
+                            <Minus size={16} />
+                          </button>
+                          <span className="text-base font-bold text-gray-800 w-10 text-center">{getCartQuantity(product._id)}</span>
+                          <button
+                            onClick={() => updateQuantity(product._id, getCartQuantity(product._id) + 1)}
+                            disabled={getCartQuantity(product._id) >= product.stock}
+                            className="inline-flex min-h-10 min-w-10 items-center justify-center bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Plus size={16} />
+                          </button>
+                          <button
+                            onClick={() => removeFromCart(product._id)}
+                            className="inline-flex min-h-10 min-w-10 items-center justify-center text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg"
+                            title="Remove from cart"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                        <p className="text-xs text-violet-700 font-semibold text-center">In cart</p>
+                      </div>
+                    ) : (
+                      <AnimatedButton
+                        onClick={() => addToCart(product)}
+                        disabled={product.stock === 0}
+                        className={`w-full min-h-11 py-2 rounded-lg font-semibold transition-all ${
+                          product.stock === 0
+                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                            : 'bg-cyan-600 text-white hover:bg-cyan-700'
+                        }`}
+                      >
+                        {product.stock === 0 ? 'Out of Stock' : 'Add to Cart'}
+                      </AnimatedButton>
+                    )}
                   </div>
                 </div>
+              </AnimatedCard>
+            ))}
+          </div>
+        )}
+      </div>
 
+      {/* Separate Cart Drawer */}
+      {showCart && (
+        <motion.div
+          className="fixed inset-0 z-50 bg-black/40"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.2 }}
+          onClick={() => setShowCart(false)}
+        >
+          <motion.div
+            className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl"
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            transition={{ type: 'spring', damping: 26, stiffness: 220 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="h-full flex flex-col p-5 sm:p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-2xl font-bold text-gray-800">Shopping Cart</h2>
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
+                    <Package size={14} />
+                    {totalCartQuantity} item(s)
+                  </div>
+                  <button
+                    onClick={() => setShowCart(false)}
+                    className="inline-flex min-h-10 items-center rounded-lg bg-gray-200 px-3 text-sm font-semibold text-gray-700 hover:bg-gray-300"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto pr-1">
                 {cart.length === 0 ? (
-                  <p className="text-gray-600 text-center py-8">Your cart is empty</p>
+                  <div className="h-full flex items-center justify-center">
+                    <p className="text-gray-600 text-center">Your cart is empty</p>
+                  </div>
                 ) : (
-                  <div>
-                    <div className="space-y-3 mb-6 max-h-96 overflow-y-auto">
-                      {cart.map(item => (
-                        <motion.div
-                          key={item._id}
-                          className="bg-gray-50 p-3 rounded-lg"
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                        >
-                          <div className="flex justify-between items-start mb-2">
-                            <p className="font-semibold text-gray-800 text-sm">{item.name}</p>
-                            <button
-                              onClick={() => removeFromCart(item._id)}
-                              className="inline-flex min-h-9 min-w-9 items-center justify-center rounded text-red-600 hover:text-red-700 hover:bg-red-50"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                          <p className="text-cyan-700 font-semibold text-sm mb-2">${item.price?.toFixed(2)}</p>
+                  <>
+                    <div className="space-y-3 mb-6">
+                    {cart.map(item => (
+                      <motion.div
+                        key={item._id}
+                        className="bg-gray-50 p-3 rounded-lg"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                      >
+                        <div className="flex justify-between items-start mb-2 gap-2">
+                          <p className="font-semibold text-gray-800 text-sm leading-5">{item.name}</p>
+                          <button
+                            onClick={() => removeFromCart(item._id)}
+                            className="inline-flex min-h-9 min-w-9 items-center justify-center rounded text-red-600 hover:text-red-700 hover:bg-red-50"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-cyan-700 font-semibold text-sm">${item.price?.toFixed(2)}</p>
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => updateQuantity(item._id, item.quantity - 1)}
@@ -419,7 +492,7 @@ const CustomerProducts = () => {
                             >
                               <Minus size={14} />
                             </button>
-                            <span className="flex-grow text-center font-semibold">{item.quantity}</span>
+                            <span className="w-8 text-center font-semibold">{item.quantity}</span>
                             <button
                               onClick={() => updateQuantity(item._id, item.quantity + 1)}
                               className="inline-flex min-h-9 min-w-9 items-center justify-center bg-gray-200 rounded hover:bg-gray-300"
@@ -427,13 +500,14 @@ const CustomerProducts = () => {
                               <Plus size={14} />
                             </button>
                           </div>
-                          <p className="text-gray-600 text-xs mt-2">Subtotal: ${(item.price * item.quantity).toFixed(2)}</p>
-                        </motion.div>
-                      ))}
+                        </div>
+                        <p className="text-gray-600 text-xs mt-2">Subtotal: ${(item.price * item.quantity).toFixed(2)}</p>
+                      </motion.div>
+                    ))}
                     </div>
 
-                    {/* Delivery Address */}
-                    <div className="mb-4 border-t pt-4">
+                    <div className="border-t pt-4">
+                    <div className="mb-4">
                       <label className="block text-sm font-medium text-gray-700 mb-2">Delivery Address *</label>
                       <textarea
                         value={deliveryAddress}
@@ -444,7 +518,6 @@ const CustomerProducts = () => {
                       />
                     </div>
 
-                    {/* Phone Number */}
                     <div className="mb-4">
                       <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number *</label>
                       <input
@@ -456,7 +529,6 @@ const CustomerProducts = () => {
                       />
                     </div>
 
-                    {/* Order Notes */}
                     <div className="mb-4">
                       <label className="block text-sm font-medium text-gray-700 mb-2">Special Notes (Optional)</label>
                       <textarea
@@ -468,40 +540,33 @@ const CustomerProducts = () => {
                       />
                     </div>
 
-                    {/* Total */}
-                    <div className="border-t pt-4 mb-4">
-                      <div className="flex justify-between mb-2">
-                        <span className="text-gray-700">Subtotal:</span>
-                        <span className="font-semibold">${calculateTotal().toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between text-lg font-bold text-cyan-700">
-                        <span>Total:</span>
-                        <span>${calculateTotal().toFixed(2)}</span>
-                      </div>
                     </div>
-
-                    {/* Order Button */}
-                    <AnimatedButton
-                      onClick={handlePlaceOrder}
-                      disabled={orderLoading || cart.length === 0 || !deliveryAddress.trim()}
-                      className="w-full min-h-11 bg-emerald-600 text-white py-3 rounded-lg font-semibold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                    >
-                      {orderLoading ? 'Placing Order...' : 'Place Order'}
-                    </AnimatedButton>
-
-                    <button
-                      onClick={() => setShowCart(false)}
-                      className="w-full min-h-11 mt-2 bg-gray-300 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-400 transition-all"
-                    >
-                      Hide Cart
-                    </button>
-                  </div>
+                  </>
                 )}
               </div>
-            </motion.div>
-          )}
-        </div>
-      </div>
+
+              <div className="border-t pt-4 mt-4 bg-white">
+                <div className="flex justify-between mb-2">
+                  <span className="text-gray-700">Subtotal:</span>
+                  <span className="font-semibold">${calculateTotal().toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-lg font-bold text-cyan-700 mb-3">
+                  <span>Total:</span>
+                  <span>${calculateTotal().toFixed(2)}</span>
+                </div>
+
+                <AnimatedButton
+                  onClick={handlePlaceOrder}
+                  disabled={orderLoading || cart.length === 0 || !deliveryAddress.trim()}
+                  className="w-full min-h-11 bg-emerald-600 text-white py-3 rounded-lg font-semibold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  {orderLoading ? 'Placing Order...' : 'Place Order'}
+                </AnimatedButton>
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
     </div>
   )
 }

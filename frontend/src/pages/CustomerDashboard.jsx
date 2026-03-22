@@ -22,23 +22,68 @@ const CustomerDashboard = () => {
   const navigate = useNavigate()
   const [orders, setOrders] = useState([])
   const [products, setProducts] = useState([])
+  const [outstandingAmount, setOutstandingAmount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   useEffect(() => {
     fetchData()
 
-    const interval = setInterval(() => {
+    const dashboardInterval = setInterval(() => {
       fetchData()
     }, 15000)
 
-    return () => clearInterval(interval)
+    // Keep outstanding amount in near real-time without reloading full dashboard data.
+    const outstandingInterval = setInterval(() => {
+      fetchOutstandingAmount(true)
+    }, 5000)
+
+    const handleWindowFocus = () => {
+      fetchOutstandingAmount(true)
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchOutstandingAmount(true)
+      }
+    }
+
+    window.addEventListener('focus', handleWindowFocus)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      clearInterval(dashboardInterval)
+      clearInterval(outstandingInterval)
+      window.removeEventListener('focus', handleWindowFocus)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
   }, [])
+
+  const fetchOutstandingAmount = async (silent = false) => {
+    try {
+      const token = localStorage.getItem('token')
+      const profileResponse = await axios.get(`${API_URL}/users/me`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      setOutstandingAmount(Number(profileResponse.data?.data?.outstandingAmount || 0))
+
+      if (!silent) {
+        setError('')
+      }
+    } catch (err) {
+      if (!silent) {
+        setError('Failed to sync outstanding amount')
+      }
+      console.error('Outstanding amount sync error:', err)
+    }
+  }
 
   const fetchData = async () => {
     try {
       setLoading(true)
       const token = localStorage.getItem('token')
+
+      await fetchOutstandingAmount(true)
       
       // Fetch orders
       const ordersResponse = await axios.get(`${API_URL}/orders`, {
@@ -111,6 +156,8 @@ const CustomerDashboard = () => {
     }
   }
 
+  const formatCurrency = (amount) => `$${Number(amount || 0).toFixed(2)}`
+
   const quickStats = [
     {
       title: 'Active Orders',
@@ -125,6 +172,13 @@ const CustomerDashboard = () => {
       icon: Package,
       color: 'from-purple-500 to-pink-500',
       action: () => navigate('/customer-products')
+    },
+    {
+      title: 'Outstanding Amount',
+      value: formatCurrency(outstandingAmount),
+      icon: AlertCircle,
+      color: outstandingAmount > 0 ? 'from-red-500 to-rose-500' : 'from-emerald-500 to-green-500',
+      action: () => navigate('/customer-orders')
     }
   ]
 
@@ -206,7 +260,7 @@ const CustomerDashboard = () => {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
                 {quickStats.map((stat, index) => {
                   const Icon = stat.icon
                   return (
@@ -224,6 +278,11 @@ const CustomerDashboard = () => {
                         <div>
                           <p className="text-sm font-medium text-gray-600">{stat.title}</p>
                           <p className="mt-2 text-2xl sm:text-3xl font-bold text-gray-800">{stat.value}</p>
+                          {stat.title === 'Outstanding Amount' && (
+                            <p className={`mt-1 text-xs font-semibold uppercase ${outstandingAmount > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                              {outstandingAmount > 0 ? 'Outstanding' : 'No Outstanding'}
+                            </p>
+                          )}
                         </div>
                         <div className={`rounded-lg bg-gradient-to-br ${stat.color} p-4`}>
                           <Icon className="text-white" size={28} />
@@ -301,6 +360,7 @@ const CustomerDashboard = () => {
                       {recentOrders.map((order) => {
                         const statusStyles = getStatusStyles(order.status)
                         const StatusIcon = statusStyles.icon
+                        const billedTime = order.billedAt || order.createdAt || order.orderDate
 
                         return (
                           <div
@@ -310,6 +370,9 @@ const CustomerDashboard = () => {
                             <div>
                               <p className="font-semibold text-gray-800">{order.orderNumber}</p>
                               <p className="text-sm text-gray-500">{formatOrderDate(order.createdAt || order.orderDate)}</p>
+                              <p className="text-xs text-cyan-700">
+                                Bill: {new Date(billedTime).toLocaleDateString()} {new Date(billedTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </p>
                             </div>
                             <div className="text-sm text-gray-600">
                               {order.items.length} item(s) • ${Number(order.totalAmount || 0).toFixed(2)}

@@ -16,7 +16,7 @@ const Users = () => {
     name: '',
     email: '',
     password: '',
-    role: 'staff'
+    role: 'manager'
   })
 
   useEffect(() => {
@@ -30,7 +30,10 @@ const Users = () => {
       const response = await axios.get(`${API_URL}/users`, {
         headers: { Authorization: `Bearer ${token}` }
       })
-      setUsers(response.data.data)
+      const filteredUsers = (response.data.data || []).filter(
+        (user) => user.role === 'admin' || user.role === 'manager'
+      )
+      setUsers(filteredUsers)
     } catch (err) {
       setError('Failed to fetch users')
       console.error(err)
@@ -121,7 +124,7 @@ const Users = () => {
 
   const resetForm = () => {
     setEditingUser(null)
-    setFormData({ name: '', email: '', password: '', role: 'staff' })
+    setFormData({ name: '', email: '', password: '', role: 'manager' })
     setShowModal(false)
   }
 
@@ -340,7 +343,6 @@ const Users = () => {
               onChange={handleInputChange}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
             >
-              <option value="staff">Staff</option>
               <option value="manager">Manager</option>
               <option value="admin">Admin</option>
             </select>

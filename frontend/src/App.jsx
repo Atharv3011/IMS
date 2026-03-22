@@ -7,6 +7,7 @@ import Categories from './pages/Categories'
 import Suppliers from './pages/Suppliers'
 import Orders from './pages/Orders'
 import Users from './pages/Users'
+import Customers from './pages/Customers'
 import Profile from './pages/Profile'
 import Notifications from './pages/Notifications'
 import Settings from './pages/Settings'
@@ -39,6 +40,7 @@ function App() {
           <Route path="suppliers" element={<Suppliers />} />
           <Route path="orders" element={<Orders />} />
           <Route path="users" element={<Users />} />
+                    <Route path="customers" element={<Customers />} />
           <Route path="profile" element={<Profile />} />
           <Route path="notifications" element={<Notifications />} />
           <Route path="settings" element={<Settings />} />

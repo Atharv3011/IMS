@@ -18,6 +18,7 @@ const menuItems = [
   { path: '/suppliers', icon: Truck, label: 'Suppliers' },
   { path: '/orders', icon: ShoppingCart, label: 'Orders' },
   { path: '/users', icon: Users, label: 'Users' },
+  { path: '/customers', icon: Users, label: 'Customers' },
 ]
 
 const Sidebar = () => {

@@ -1,14 +1,22 @@
 import { motion } from 'framer-motion'
 import { useState, useEffect } from 'react'
-import { Plus, Search, Edit2, Trash2, Package, Loader } from 'lucide-react'
-import axios, { API_URL } from '../utils/api'
+import { Plus, Search, Edit2, Trash2, Package, Loader, Archive, RotateCcw } from 'lucide-react'
+import axios, { API_URL, BACKEND_ORIGIN } from '../utils/api'
 import AnimatedCard from '../components/AnimatedCard'
 import AnimatedButton from '../components/AnimatedButton'
 import AnimatedModal from '../components/AnimatedModal'
 
 const Products = () => {
+  const resolveImageUrl = (value) => {
+    if (!value) return ''
+    if (value.startsWith('http://') || value.startsWith('https://')) return value
+    const normalizedPath = value.startsWith('/') ? value : `/${value}`
+    return BACKEND_ORIGIN ? `${BACKEND_ORIGIN}${normalizedPath}` : normalizedPath
+  }
+
   const [showModal, setShowModal] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [products, setProducts] = useState([])
   const [categories, setCategories] = useState([])
   const [suppliers, setSuppliers] = useState([])
@@ -23,6 +31,8 @@ const Products = () => {
     stock: '',
     description: ''
   })
+  const [selectedImage, setSelectedImage] = useState(null)
+  const [imagePreview, setImagePreview] = useState('')
 
   useEffect(() => {
     fetchProducts()
@@ -34,7 +44,7 @@ const Products = () => {
     try {
       setLoading(true)
       const token = localStorage.getItem('token')
-      const response = await axios.get(`${API_URL}/products`, {
+      const response = await axios.get(`${API_URL}/products?includeArchived=true`, {
         headers: { Authorization: `Bearer ${token}` }
       })
       setProducts(response.data.data)
@@ -74,6 +84,14 @@ const Products = () => {
     setFormData({ ...formData, [e.target.name]: e.target.value })
   }
 
+  const handleImageChange = (e) => {
+    const file = e.target.files?.[0]
+    setSelectedImage(file || null)
+    if (file) {
+      setImagePreview(URL.createObjectURL(file))
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     
@@ -85,13 +103,15 @@ const Products = () => {
     setLoading(true)
     try {
       const token = localStorage.getItem('token')
-      const dataToSend = {
-        name: formData.name,
-        category: formData.category,
-        supplier: formData.supplier,
-        price: parseFloat(formData.price),
-        stock: parseInt(formData.stock) || 0,
-        description: formData.description
+      const dataToSend = new FormData()
+      dataToSend.append('name', formData.name)
+      dataToSend.append('category', formData.category)
+      dataToSend.append('supplier', formData.supplier)
+      dataToSend.append('price', parseFloat(formData.price))
+      dataToSend.append('stock', parseInt(formData.stock) || 0)
+      dataToSend.append('description', formData.description || '')
+      if (selectedImage) {
+        dataToSend.append('image', selectedImage)
       }
 
       if (editingProduct) {
@@ -105,6 +125,8 @@ const Products = () => {
       }
       setShowModal(false)
       setEditingProduct(null)
+      setSelectedImage(null)
+      setImagePreview('')
       setFormData({ name: '', category: '', supplier: '', price: '', stock: '', description: '' })
       fetchProducts()
       setError('')
@@ -126,6 +148,8 @@ const Products = () => {
       stock: product.stock,
       description: product.description || ''
     })
+    setSelectedImage(null)
+    setImagePreview(resolveImageUrl(product.imageUrl || ''))
     setShowModal(true)
   }
 
@@ -146,8 +170,31 @@ const Products = () => {
     }
   }
 
+  const handleArchiveToggle = async (product) => {
+    const isArchived = product.status === 'archived'
+    const actionText = isArchived ? 'unarchive' : 'archive'
+    if (!window.confirm(`Are you sure you want to ${actionText} this product?`)) return
+
+    setLoading(true)
+    try {
+      const token = localStorage.getItem('token')
+      const endpoint = isArchived ? 'unarchive' : 'archive'
+      await axios.patch(`${API_URL}/products/${product._id}/${endpoint}`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      fetchProducts()
+      setError('')
+    } catch (err) {
+      setError(err.response?.data?.message || `Failed to ${actionText} product`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const resetForm = () => {
     setEditingProduct(null)
+    setSelectedImage(null)
+    setImagePreview('')
     setFormData({ name: '', category: '', supplier: '', price: '', stock: '', description: '' })
     setShowModal(false)
   }
@@ -155,6 +202,13 @@ const Products = () => {
   const filteredProducts = products.filter(product =>
     product.name.toLowerCase().includes(searchTerm.toLowerCase())
   )
+
+  const visibleProducts = filteredProducts.filter((product) => {
+    if (statusFilter === 'all') return true
+    if (statusFilter === 'active') return product.status === 'active'
+    if (statusFilter === 'archived') return product.status === 'archived'
+    return true
+  })
 
   return (
     <motion.div
@@ -191,6 +245,42 @@ const Products = () => {
 
       <AnimatedCard delay={0.2} hover={false}>
         <div className="mb-4">
+          <div className="mb-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setStatusFilter('all')}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                statusFilter === 'all'
+                  ? 'bg-purple-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('active')}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                statusFilter === 'active'
+                  ? 'bg-green-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Active
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('archived')}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                statusFilter === 'archived'
+                  ? 'bg-gray-700 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Archived
+            </button>
+          </div>
+
           <motion.div 
             className="relative"
             initial={{ opacity: 0, y: -20 }}
@@ -224,20 +314,21 @@ const Products = () => {
                 >
                   <th className="text-left py-3 px-4 font-semibold text-gray-700">Product</th>
                   <th className="text-left py-3 px-4 font-semibold text-gray-700">Category</th>
+                  <th className="text-left py-3 px-4 font-semibold text-gray-700">Status</th>
                   <th className="text-left py-3 px-4 font-semibold text-gray-700">Stock</th>
                   <th className="text-left py-3 px-4 font-semibold text-gray-700">Price</th>
                   <th className="text-left py-3 px-4 font-semibold text-gray-700">Actions</th>
                 </motion.tr>
               </thead>
               <tbody>
-                {filteredProducts.length === 0 ? (
+                {visibleProducts.length === 0 ? (
                   <tr>
-                    <td colSpan="5" className="text-center py-8 text-gray-500">
+                    <td colSpan="6" className="text-center py-8 text-gray-500">
                       No products found
                     </td>
                   </tr>
                 ) : (
-                  filteredProducts.map((product, index) => (
+                  visibleProducts.map((product, index) => (
                     <motion.tr
                       key={product._id}
                       className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
@@ -248,17 +339,39 @@ const Products = () => {
                     >
                       <td className="py-4 px-4">
                         <div className="flex items-center gap-3">
-                          <motion.div 
-                            className="w-10 h-10 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg flex items-center justify-center"
-                            whileHover={{ rotate: 360 }}
-                            transition={{ duration: 0.6 }}
-                          >
-                            <Package className="text-white" size={20} />
-                          </motion.div>
+                          {product.imageUrl ? (
+                            <img
+                              src={resolveImageUrl(product.imageUrl)}
+                              alt={product.name}
+                              className="w-10 h-10 rounded-lg object-cover border border-gray-200"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none'
+                              }}
+                            />
+                          ) : (
+                            <motion.div 
+                              className="w-10 h-10 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg flex items-center justify-center"
+                              whileHover={{ rotate: 360 }}
+                              transition={{ duration: 0.6 }}
+                            >
+                              <Package className="text-white" size={20} />
+                            </motion.div>
+                          )}
                           <span className="font-medium text-gray-800">{product.name}</span>
                         </div>
                       </td>
                       <td className="py-4 px-4 text-gray-600">{product.category?.name || 'N/A'}</td>
+                      <td className="py-4 px-4">
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold uppercase ${
+                          product.status === 'archived'
+                            ? 'bg-gray-200 text-gray-700'
+                            : product.status === 'active'
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-yellow-100 text-yellow-700'
+                        }`}>
+                          {product.status || 'active'}
+                        </span>
+                      </td>
                       <td className="py-4 px-4">
                         <motion.span 
                           className={`px-3 py-1 rounded-full text-sm font-medium ${
@@ -283,6 +396,19 @@ const Products = () => {
                             whileTap={{ scale: 0.9 }}
                           >
                             <Edit2 size={18} />
+                          </motion.button>
+                          <motion.button
+                            onClick={() => handleArchiveToggle(product)}
+                            className={`p-2 rounded-lg ${
+                              product.status === 'archived'
+                                ? 'hover:bg-emerald-50 text-emerald-600'
+                                : 'hover:bg-amber-50 text-amber-600'
+                            }`}
+                            whileHover={{ scale: 1.2 }}
+                            whileTap={{ scale: 0.9 }}
+                            title={product.status === 'archived' ? 'Unarchive Product' : 'Archive Product'}
+                          >
+                            {product.status === 'archived' ? <RotateCcw size={18} /> : <Archive size={18} />}
                           </motion.button>
                           <motion.button
                             onClick={() => handleDelete(product._id)}
@@ -322,6 +448,25 @@ const Products = () => {
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
               placeholder="Enter product name"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Product Image (Optional)
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageChange}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+            {imagePreview && (
+              <img
+                src={imagePreview}
+                alt="Product preview"
+                className="mt-3 w-28 h-28 object-cover rounded-lg border border-gray-200"
+              />
+            )}
           </div>
           
           <div>

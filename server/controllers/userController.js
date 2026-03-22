@@ -19,6 +19,32 @@ export const getUser = async (req, res) => {
     }
 };
 
+export const getCustomers = async (req, res) => {
+    try {
+        const customers = await User.find({ role: 'customer' })
+            .select('_id name email phone address company status outstandingAmount createdAt')
+            .sort({ createdAt: -1 })
+            .lean();
+
+        const normalizedCustomers = customers.map((customer) => ({
+            ...customer,
+            outstandingAmount: Number(customer.outstandingAmount || 0)
+        }));
+
+        res.json({
+            success: true,
+            count: normalizedCustomers.length,
+            data: normalizedCustomers
+        });
+    } catch (error) {
+        console.error('Get customers error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching customers'
+        });
+    }
+};
+
 export const addUser = async (req, res) => {
     try {
         const { name, email, password, address, role } = req.body;
@@ -159,6 +185,8 @@ export const updateUser = async (req, res) => {
     try {
         const { id } = req.params;
         const { name, email, address, phone, role, password, status } = req.body;
+        const hasOutstandingAmount = Object.prototype.hasOwnProperty.call(req.body, 'outstandingAmount');
+        const outstandingAmount = hasOutstandingAmount ? Number(req.body.outstandingAmount) : undefined;
 
         if (id === req.user.id && role && role !== req.user.role) {
             return res.status(400).json({
@@ -174,6 +202,15 @@ export const updateUser = async (req, res) => {
         if (phone) updateData.phone = phone;
         if (role) updateData.role = role;
         if (status) updateData.status = status;
+        if (hasOutstandingAmount) {
+            if (Number.isNaN(outstandingAmount) || outstandingAmount < 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Outstanding amount must be a non-negative number'
+                });
+            }
+            updateData.outstandingAmount = outstandingAmount;
+        }
         if (password) {
             updateData.password = await bcrypt.hash(password, 10);
         }
