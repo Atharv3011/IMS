@@ -386,7 +386,7 @@ const Products = () => {
                           {product.stock}
                         </motion.span>
                       </td>
-                      <td className="py-4 px-4 font-semibold text-gray-800">${product.price}</td>
+                      <td className="py-4 px-4 font-semibold text-gray-800">₹{product.price}</td>
                       <td className="py-4 px-4">
                         <div className="flex gap-2">
                           <motion.button

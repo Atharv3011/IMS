@@ -156,7 +156,7 @@ const CustomerDashboard = () => {
     }
   }
 
-  const formatCurrency = (amount) => `$${Number(amount || 0).toFixed(2)}`
+  const formatCurrency = (amount) => `₹${Number(amount || 0).toFixed(2)}`
 
   const quickStats = [
     {

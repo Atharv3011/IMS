@@ -372,7 +372,7 @@ const CustomerProducts = () => {
                   <div className="border-t pt-4">
                     <div className="flex justify-between items-center mb-4">
                       <div>
-                        <p className="text-2xl font-bold text-cyan-700">${product.price?.toFixed(2) || '0.00'}</p>
+                        <p className="text-2xl font-bold text-cyan-700">₹{product.price?.toFixed(2) || '0.00'}</p>
                         <p className={`text-sm ${product.stock > 0 ? 'text-green-600' : 'text-red-600'}`}>
                           Stock: {product.stock}
                         </p>
@@ -484,7 +484,7 @@ const CustomerProducts = () => {
                           </button>
                         </div>
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-cyan-700 font-semibold text-sm">${item.price?.toFixed(2)}</p>
+                          <p className="text-cyan-700 font-semibold text-sm">₹{item.price?.toFixed(2)}</p>
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => updateQuantity(item._id, item.quantity - 1)}
@@ -501,7 +501,7 @@ const CustomerProducts = () => {
                             </button>
                           </div>
                         </div>
-                        <p className="text-gray-600 text-xs mt-2">Subtotal: ${(item.price * item.quantity).toFixed(2)}</p>
+                        <p className="text-gray-600 text-xs mt-2">Subtotal: ₹{(item.price * item.quantity).toFixed(2)}</p>
                       </motion.div>
                     ))}
                     </div>
@@ -548,11 +548,11 @@ const CustomerProducts = () => {
               <div className="border-t pt-4 mt-4 bg-white">
                 <div className="flex justify-between mb-2">
                   <span className="text-gray-700">Subtotal:</span>
-                  <span className="font-semibold">${calculateTotal().toFixed(2)}</span>
+                  <span className="font-semibold">₹{calculateTotal().toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-lg font-bold text-cyan-700 mb-3">
                   <span>Total:</span>
-                  <span>${calculateTotal().toFixed(2)}</span>
+                  <span>₹{calculateTotal().toFixed(2)}</span>
                 </div>
 
                 <AnimatedButton

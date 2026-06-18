@@ -63,7 +63,7 @@ const Dashboard = () => {
         id: order._id,
         action: 'Order Created',
         item: `${order.customerName} ordered ${order.items.length} item(s)`,
-        total: `$${order.totalAmount}`,
+        total: `₹${order.totalAmount}`,
         time: new Date(order.createdAt).toLocaleDateString(),
         status: order.status,
         type: order.status === 'completed' ? 'success' : order.status === 'pending' ? 'warning' : 'info'

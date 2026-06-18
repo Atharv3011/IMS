@@ -42,6 +42,31 @@ export const buildApiUrl = (path) => {
   return `${API_URL}${safePath}`
 }
 
-axios.defaults.baseURL = API_URL
+// Keep baseURL empty because most calls already use API_URL explicitly.
+// This avoids accidental /api/api/... URLs in deployed environments.
+axios.defaults.baseURL = ''
+
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error?.response?.status
+    const message = error?.response?.data?.message || ''
+
+    const isExpiredOrInvalidToken =
+      status === 401 && /(token|authorization denied|user not found|no token)/i.test(message)
+
+    if (isExpiredOrInvalidToken) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('user')
+      delete axios.defaults.headers.common.Authorization
+
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
+
+    return Promise.reject(error)
+  }
+)
 
 export default axios

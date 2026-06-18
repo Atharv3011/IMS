@@ -7,6 +7,16 @@ import AnimatedButton from '../components/AnimatedButton'
 import AnimatedModal from '../components/AnimatedModal'
 
 const Orders = () => {
+  const getStoredUser = () => {
+    try {
+      return JSON.parse(localStorage.getItem('user') || 'null')
+    } catch {
+      return null
+    }
+  }
+
+  const loggedInUser = getStoredUser()
+
   const [showModal, setShowModal] = useState(false)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
   const [selectedOrder, setSelectedOrder] = useState(null)
@@ -15,6 +25,7 @@ const Orders = () => {
   const [orders, setOrders] = useState([])
   const [products, setProducts] = useState([])
   const [customers, setCustomers] = useState([])
+  const [sellers, setSellers] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   
@@ -24,7 +35,13 @@ const Orders = () => {
     customerName: '',
     customerEmail: '',
     customerPhone: '',
+    sellerId: loggedInUser?.id || '',
+    sellerName: loggedInUser?.name || '',
     deliveryAddress: '',
+    isGstBill: false,
+    gstRate: 18,
+    sellerGstNo: '',
+    customerGstNo: '',
     notes: ''
   })
   const [selectedProducts, setSelectedProducts] = useState([])
@@ -34,12 +51,18 @@ const Orders = () => {
     customerName: '',
     customerEmail: '',
     customerPhone: '',
+    sellerId: loggedInUser?.id || '',
+    sellerName: loggedInUser?.name || '',
     deliveryAddress: '',
+    isGstBill: false,
+    gstRate: 18,
+    sellerGstNo: '',
+    customerGstNo: '',
     notes: '',
     items: []
   })
 
-  const formatCurrency = (amount) => `$${Number(amount || 0).toFixed(2)}`
+  const formatCurrency = (amount) => `₹${Number(amount || 0).toFixed(2)}`
 
   const getProductSummary = (items = []) => {
     if (!items.length) return 'No products'
@@ -58,6 +81,7 @@ const Orders = () => {
   useEffect(() => {
     fetchOrders()
     fetchProducts()
+    fetchSellers()
 
     const interval = setInterval(() => {
       fetchOrders(true)
@@ -69,8 +93,33 @@ const Orders = () => {
   useEffect(() => {
     if (showModal) {
       fetchCustomers()
+      fetchSellers()
     }
   }, [showModal])
+
+  const fetchSellers = async () => {
+    try {
+      const token = localStorage.getItem('token')
+      const response = await axios.get(`${API_URL}/users`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      const availableSellers = (response.data.data || []).filter(
+        (user) => user.role !== 'customer' && user.status !== 'inactive'
+      )
+      setSellers(availableSellers)
+
+      if (!formData.sellerId && loggedInUser?.id) {
+        setFormData((prev) => ({
+          ...prev,
+          sellerId: loggedInUser.id,
+          sellerName: loggedInUser.name || ''
+        }))
+      }
+    } catch (err) {
+      console.error('Fetch sellers error:', err)
+    }
+  }
 
   const fetchCustomers = async () => {
     try {
@@ -110,6 +159,24 @@ const Orders = () => {
     }
   }
 
+  const handleSelectSeller = (sellerId) => {
+    const seller = sellers.find((s) => s._id === sellerId)
+    setFormData((prev) => ({
+      ...prev,
+      sellerId,
+      sellerName: seller?.name || ''
+    }))
+  }
+
+  const handleSelectEditSeller = (sellerId) => {
+    const seller = sellers.find((s) => s._id === sellerId)
+    setEditBillData((prev) => ({
+      ...prev,
+      sellerId,
+      sellerName: seller?.name || ''
+    }))
+  }
+
   const handleClearCustomer = () => {
     setSelectedCustomer(null)
     setFormData({
@@ -117,7 +184,13 @@ const Orders = () => {
       customerName: '',
       customerEmail: '',
       customerPhone: '',
+      sellerId: loggedInUser?.id || '',
+      sellerName: loggedInUser?.name || '',
       deliveryAddress: '',
+      isGstBill: false,
+      gstRate: 18,
+      sellerGstNo: '',
+      customerGstNo: '',
       notes: ''
     })
   }
@@ -156,9 +229,10 @@ const Orders = () => {
   }
 
   const handleInputChange = (e) => {
+    const { name, value, type, checked } = e.target
     setFormData({
       ...formData,
-      [e.target.name]: e.target.value
+      [name]: type === 'checkbox' ? checked : value
     })
   }
 
@@ -188,6 +262,16 @@ const Orders = () => {
   const handlePrintBill = (order) => {
     if (!order) return
 
+    let sellerProfile = null
+    try {
+      sellerProfile = JSON.parse(localStorage.getItem('user') || 'null')
+    } catch (parseError) {
+      sellerProfile = null
+    }
+
+    const sellerName = order.sellerName || sellerProfile?.name || 'Seller'
+    const sellerContact = sellerProfile?.phone || ''
+
     const printWindow = window.open('', '_blank', 'width=900,height=700')
     if (!printWindow) {
       setError('Please allow pop-ups to print the bill')
@@ -208,14 +292,24 @@ const Orders = () => {
 
     const orderDate = new Date(order.createdAt || order.orderDate)
     const billDate = new Date(order.billedAt || order.createdAt || order.orderDate)
-    const itemTotal = formatCurrency(order.itemTotal || order.totalAmount)
+    const itemTotalValue = Number(order.itemTotal || 0)
+    const inferredGstEnabled = Boolean(order.isGstBill || (order.sellerGstNo || '').trim() || (order.customerGstNo || '').trim())
+    const gstEnabled = inferredGstEnabled
+    const gstRate = gstEnabled ? Number(order.gstRate || 18) : 0
+    const gstAmountValue = gstEnabled
+      ? Number(order.gstAmount || ((itemTotalValue * gstRate) / 100))
+      : 0
+    const computedTotalAmount = itemTotalValue + gstAmountValue
+    const itemTotal = formatCurrency(itemTotalValue)
+    const gstAmount = formatCurrency(gstAmountValue)
     const outstandingAmount = formatCurrency(order.outstandingAmountAtTime || 0)
-    const totalBilled = formatCurrency(order.totalBilled || order.totalAmount)
+    const totalAmountValue = Number(order.totalAmount || computedTotalAmount)
+    const totalBilled = formatCurrency(order.totalBilled || (totalAmountValue + Number(order.outstandingAmountAtTime || 0)))
 
     printWindow.document.write(`
       <html>
         <head>
-          <title>Order Bill</title>
+          <title>Invoice</title>
           <style>
             body { font-family: Arial, sans-serif; color: #111827; margin: 24px; }
             h1 { margin: 0 0 8px; }
@@ -230,17 +324,25 @@ const Orders = () => {
           </style>
         </head>
         <body>
-          <h1>Order Bill</h1>
+          <h1>Invoice</h1>
           <div class="muted">Generated on ${new Date().toLocaleString()}</div>
 
           <div class="section row">
             <div class="card" style="flex: 1;">
+              <div class="muted">Seller Name</div>
+              <div style="font-weight: 700;">${sellerName}</div>
+              <div class="muted" style="margin-top: 6px;">Contact</div>
+              <div>${sellerContact}</div>
               <div class="muted">Order Number</div>
               <div style="font-weight: 700; font-size: 18px;">${order.orderNumber}</div>
               <div class="muted" style="margin-top: 6px;">Order Date</div>
               <div>${orderDate.toLocaleDateString()}</div>
               <div class="muted" style="margin-top: 6px;">Bill Date & Time</div>
               <div>${billDate.toLocaleDateString()} ${billDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+              ${gstEnabled ? `
+                <div class="muted" style="margin-top: 6px;">Seller GST No.</div>
+                <div>${order.sellerGstNo || 'N/A'}</div>
+              ` : ''}
               <div class="muted" style="margin-top: 6px;">Status</div>
               <div style="text-transform: uppercase;">${order.status}</div>
             </div>
@@ -249,6 +351,10 @@ const Orders = () => {
               <div style="font-weight: 700;">${order.customerName}</div>
               <div>${order.customerEmail || ''}</div>
               <div>${order.customerPhone || ''}</div>
+              ${gstEnabled ? `
+                <div class="muted" style="margin-top: 6px;">Customer GST No.</div>
+                <div>${order.customerGstNo || 'N/A'}</div>
+              ` : ''}
               <div class="muted" style="margin-top: 6px;">Delivery Address</div>
               <div>${order.deliveryAddress || ''}</div>
             </div>
@@ -272,11 +378,12 @@ const Orders = () => {
               </table>
               <div style="display: flex; justify-content: flex-end; margin-top: 12px; flex-direction: column; align-items: flex-end; gap: 8px;">
                 <div style="font-size: 16px;">Order Items Total: ${itemTotal}</div>
+                ${gstEnabled ? `<div style="font-size: 14px; color: #1d4ed8;">GST (${gstRate}%): ${gstAmount}</div>` : ''}
                 ${Number(order.outstandingAmountAtTime || 0) > 0 ? `
                   <div style="font-size: 14px; color: #d97706;">Previous Outstanding: ${outstandingAmount}</div>
                   <div class="total" style="border-top: 2px solid #e5e7eb; padding-top: 8px;">Total Billed Amount: ${totalBilled}</div>
                 ` : `
-                  <div class="total">Total Amount: ${itemTotal}</div>
+                  <div class="total">Total Amount: ${formatCurrency(totalAmountValue)}</div>
                 `}
               </div>
             </div>
@@ -331,7 +438,13 @@ const Orders = () => {
         customerName: formData.customerName.trim(),
         customerEmail: formData.customerEmail.trim(),
         customerPhone: formData.customerPhone.trim(),
+        sellerId: formData.sellerId || undefined,
+        sellerName: formData.sellerName.trim(),
         deliveryAddress: formData.deliveryAddress.trim(),
+        isGstBill: Boolean(formData.isGstBill),
+        gstRate: Number(formData.gstRate || 0),
+        sellerGstNo: formData.sellerGstNo.trim(),
+        customerGstNo: formData.customerGstNo.trim(),
         items: selectedProducts.map(p => ({ product: p.product, quantity: p.quantity })),
         notes: formData.notes.trim()
       }
@@ -346,10 +459,17 @@ const Orders = () => {
       
       setShowModal(false)
       setFormData({ 
+        customerId: '',
         customerName: '', 
         customerEmail: '', 
         customerPhone: '', 
+        sellerId: loggedInUser?.id || '',
+        sellerName: loggedInUser?.name || '',
         deliveryAddress: '', 
+        isGstBill: false,
+        gstRate: 18,
+        sellerGstNo: '',
+        customerGstNo: '',
         notes: '' 
       })
       setSelectedProducts([])
@@ -422,7 +542,13 @@ const Orders = () => {
       customerName: order.customerName || '',
       customerEmail: order.customerEmail || '',
       customerPhone: order.customerPhone || '',
+      sellerId: order.sellerId || '',
+      sellerName: order.sellerName || '',
       deliveryAddress: order.deliveryAddress || '',
+      isGstBill: Boolean(order.isGstBill),
+      gstRate: Number(order.gstRate || 18),
+      sellerGstNo: order.sellerGstNo || '',
+      customerGstNo: order.customerGstNo || '',
       notes: order.notes || '',
       items: (order.items || []).map((item) => ({
         product: item.product?._id || item.product,
@@ -435,9 +561,10 @@ const Orders = () => {
   }
 
   const handleEditBillInputChange = (e) => {
+    const { name, value, type, checked } = e.target
     setEditBillData((prev) => ({
       ...prev,
-      [e.target.name]: e.target.value
+      [name]: type === 'checkbox' ? checked : value
     }))
   }
 
@@ -504,7 +631,13 @@ const Orders = () => {
         customerName: editBillData.customerName.trim(),
         customerEmail: editBillData.customerEmail.trim(),
         customerPhone: editBillData.customerPhone.trim(),
+        sellerId: editBillData.sellerId || undefined,
+        sellerName: editBillData.sellerName.trim(),
         deliveryAddress: editBillData.deliveryAddress.trim(),
+        isGstBill: Boolean(editBillData.isGstBill),
+        gstRate: Number(editBillData.gstRate || 0),
+        sellerGstNo: editBillData.sellerGstNo.trim(),
+        customerGstNo: editBillData.customerGstNo.trim(),
         notes: editBillData.notes.trim(),
         items: editBillData.items.map((item) => ({
           product: item.product,
@@ -747,6 +880,24 @@ const Orders = () => {
         size="lg"
       >
         <form onSubmit={handleCreateOrder} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Select Seller
+            </label>
+            <select
+              value={formData.sellerId}
+              onChange={(e) => handleSelectSeller(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              <option value="">-- Select seller --</option>
+              {sellers.map((seller) => (
+                <option key={seller._id} value={seller._id}>
+                  {seller.name} ({seller.role})
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Customer Selection */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -845,6 +996,59 @@ const Orders = () => {
             />
           </div>
 
+          <div className="rounded-lg border border-gray-200 p-4 space-y-3">
+            <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
+              <input
+                type="checkbox"
+                name="isGstBill"
+                checked={formData.isGstBill}
+                onChange={handleInputChange}
+                className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+              />
+              Enable GST Billing (Optional)
+            </label>
+
+            {formData.isGstBill && (
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">GST Rate (%)</label>
+                  <input
+                    type="number"
+                    name="gstRate"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    value={formData.gstRate}
+                    onChange={handleInputChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Seller GST No. (Optional)</label>
+                  <input
+                    type="text"
+                    name="sellerGstNo"
+                    value={formData.sellerGstNo}
+                    onChange={handleInputChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="Enter seller GST number"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Customer GST No. (Optional)</label>
+                  <input
+                    type="text"
+                    name="customerGstNo"
+                    value={formData.customerGstNo}
+                    onChange={handleInputChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="Enter customer GST number"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Select Products
@@ -888,6 +1092,14 @@ const Orders = () => {
                 </div>
               ))}
               <div className="p-3 bg-purple-50 rounded-lg space-y-2">
+                {formData.isGstBill && (
+                  <div className="flex justify-between text-sm text-blue-700">
+                    <span>GST ({Number(formData.gstRate || 0)}%):</span>
+                    <span>
+                      ${((selectedProducts.reduce((sum, item) => sum + (item.price * item.quantity), 0) * Number(formData.gstRate || 0)) / 100).toFixed(2)}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between font-semibold">
                   <span>Order Items Total:</span>
                   <span className="text-purple-600">${selectedProducts.reduce((sum, item) => sum + (item.price * item.quantity), 0).toFixed(2)}</span>
@@ -900,7 +1112,11 @@ const Orders = () => {
                     </div>
                     <div className="flex justify-between font-bold border-t border-purple-200 pt-2 text-amber-700">
                       <span>Total to be Billed:</span>
-                      <span>${(selectedProducts.reduce((sum, item) => sum + (item.price * item.quantity), 0) + selectedCustomer.outstandingAmount).toFixed(2)}</span>
+                      <span>${(
+                        selectedProducts.reduce((sum, item) => sum + (item.price * item.quantity), 0) +
+                        ((selectedProducts.reduce((sum, item) => sum + (item.price * item.quantity), 0) * Number(formData.gstRate || 0)) / 100) * (formData.isGstBill ? 1 : 0) +
+                        selectedCustomer.outstandingAmount
+                      ).toFixed(2)}</span>
                     </div>
                   </>
                 )}
@@ -996,6 +1212,26 @@ const Orders = () => {
               </div>
             </div>
 
+            <div>
+              <p className="text-sm text-gray-600 mb-1">Seller</p>
+              {isEditingBill ? (
+                <select
+                  value={editBillData.sellerId}
+                  onChange={(e) => handleSelectEditSeller(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="">-- Select seller --</option>
+                  {sellers.map((seller) => (
+                    <option key={seller._id} value={seller._id}>
+                      {seller.name} ({seller.role})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <p className="font-semibold text-gray-800">{selectedOrder.sellerName || 'N/A'}</p>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Order Type</p>
@@ -1032,6 +1268,65 @@ const Orders = () => {
                 />
               ) : (
                 <p className="text-gray-800">{selectedOrder.deliveryAddress}</p>
+              )}
+            </div>
+
+            <div>
+              <p className="text-sm text-gray-600 mb-1">GST Billing</p>
+              {isEditingBill ? (
+                <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+                  <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      name="isGstBill"
+                      checked={editBillData.isGstBill}
+                      onChange={handleEditBillInputChange}
+                      className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                    />
+                    Enable GST Billing
+                  </label>
+                  {editBillData.isGstBill && (
+                    <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                      <input
+                        type="number"
+                        name="gstRate"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={editBillData.gstRate}
+                        onChange={handleEditBillInputChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        placeholder="GST rate (%)"
+                      />
+                      <input
+                        type="text"
+                        name="sellerGstNo"
+                        value={editBillData.sellerGstNo}
+                        onChange={handleEditBillInputChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        placeholder="Seller GST no."
+                      />
+                      <input
+                        type="text"
+                        name="customerGstNo"
+                        value={editBillData.customerGstNo}
+                        onChange={handleEditBillInputChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 md:col-span-2"
+                        placeholder="Customer GST no."
+                      />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-sm text-gray-700">
+                  <p>{selectedOrder.isGstBill ? `Enabled (${Number(selectedOrder.gstRate || 0)}%)` : 'Disabled'}</p>
+                  {selectedOrder.isGstBill && (
+                    <>
+                      <p>Seller GST: {selectedOrder.sellerGstNo || 'N/A'}</p>
+                      <p>Customer GST: {selectedOrder.customerGstNo || 'N/A'}</p>
+                    </>
+                  )}
+                </div>
               )}
             </div>
 
@@ -1111,10 +1406,25 @@ const Orders = () => {
                 <span className="text-lg font-semibold text-gray-800">Total Amount</span>
                 <span className="text-2xl font-bold text-purple-600">
                   {isEditingBill
-                    ? formatCurrency(editBillData.items.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 0)), 0))
+                    ? formatCurrency(
+                      editBillData.items.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 0)), 0) +
+                      (editBillData.isGstBill
+                        ? (editBillData.items.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 0)), 0) * Number(editBillData.gstRate || 0)) / 100
+                        : 0)
+                    )
                     : `$${selectedOrder.totalAmount.toLocaleString()}`}
                 </span>
               </div>
+              {(isEditingBill ? editBillData.isGstBill : selectedOrder.isGstBill) && (
+                <div className="mt-2 flex justify-between text-sm text-blue-700">
+                  <span>GST ({isEditingBill ? Number(editBillData.gstRate || 0) : Number(selectedOrder.gstRate || 0)}%):</span>
+                  <span>
+                    {isEditingBill
+                      ? formatCurrency((editBillData.items.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 0)), 0) * Number(editBillData.gstRate || 0)) / 100)
+                      : formatCurrency(selectedOrder.gstAmount || 0)}
+                  </span>
+                </div>
+              )}
               {selectedOrder.outstandingAmountAtTime > 0 && (
                 <div className="mt-3 bg-amber-50 p-3 rounded-lg">
                   <p className="text-sm text-amber-700 mb-2">
@@ -1129,6 +1439,16 @@ const Orders = () => {
                           : `$${selectedOrder.itemTotal?.toFixed(2) || selectedOrder.totalAmount.toFixed(2)}`}
                       </span>
                     </div>
+                    {(isEditingBill ? editBillData.isGstBill : selectedOrder.isGstBill) && (
+                      <div className="flex justify-between text-amber-700">
+                        <span>GST:</span>
+                        <span>
+                          {isEditingBill
+                            ? formatCurrency((editBillData.items.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 0)), 0) * Number(editBillData.gstRate || 0)) / 100)
+                            : formatCurrency(selectedOrder.gstAmount || 0)}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-amber-700">
                       <span>Previous Outstanding:</span>
                       <span>${selectedOrder.outstandingAmountAtTime.toFixed(2)}</span>
@@ -1140,6 +1460,9 @@ const Orders = () => {
                       {isEditingBill
                         ? formatCurrency(
                           editBillData.items.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 0)), 0) +
+                          (editBillData.isGstBill
+                            ? (editBillData.items.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.quantity || 0)), 0) * Number(editBillData.gstRate || 0)) / 100
+                            : 0) +
                           Number(selectedOrder.outstandingAmountAtTime || 0)
                         )
                         : `$${selectedOrder.totalBilled?.toFixed(2) || selectedOrder.totalAmount.toFixed(2)}`}
@@ -1178,7 +1501,13 @@ const Orders = () => {
                         customerName: selectedOrder.customerName || '',
                         customerEmail: selectedOrder.customerEmail || '',
                         customerPhone: selectedOrder.customerPhone || '',
+                        sellerId: selectedOrder.sellerId || '',
+                        sellerName: selectedOrder.sellerName || '',
                         deliveryAddress: selectedOrder.deliveryAddress || '',
+                        isGstBill: Boolean(selectedOrder.isGstBill),
+                        gstRate: Number(selectedOrder.gstRate || 18),
+                        sellerGstNo: selectedOrder.sellerGstNo || '',
+                        customerGstNo: selectedOrder.customerGstNo || '',
                         notes: selectedOrder.notes || '',
                         items: (selectedOrder.items || []).map((item) => ({
                           product: item.product?._id || item.product,

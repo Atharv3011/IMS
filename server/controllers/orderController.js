@@ -33,7 +33,7 @@ export const getOrders = async (req, res) => {
         }
         
         const orders = await Order.find(query)
-            .select('orderNumber customerId customerName customerEmail customerPhone deliveryAddress items itemTotal outstandingAmountAtTime totalBilled totalAmount paymentStatus paidAmount status orderDate billedAt notes createdAt')
+            .select('orderNumber customerId customerName customerEmail customerPhone sellerId sellerName deliveryAddress items itemTotal outstandingAmountAtTime totalBilled totalAmount isGstBill gstRate gstAmount sellerGstNo customerGstNo paymentStatus paidAmount status orderDate billedAt notes createdAt')
             .sort({ createdAt: -1 })
             .lean();
 
@@ -56,7 +56,7 @@ export const getOrderById = async (req, res) => {
         const { id } = req.params;
 
         const order = await Order.findById(id)
-            .select('orderNumber customerId customerName customerEmail customerPhone deliveryAddress items itemTotal outstandingAmountAtTime totalBilled totalAmount paymentStatus paidAmount status orderDate billedAt notes createdAt')
+            .select('orderNumber customerId customerName customerEmail customerPhone sellerId sellerName deliveryAddress items itemTotal outstandingAmountAtTime totalBilled totalAmount isGstBill gstRate gstAmount sellerGstNo customerGstNo paymentStatus paidAmount status orderDate billedAt notes createdAt')
             .lean();
 
         if (!order) {
@@ -93,7 +93,13 @@ export const createOrder = async (req, res) => {
             customerName, 
             customerEmail, 
             customerPhone, 
+            sellerId,
+            sellerName,
             deliveryAddress, 
+            isGstBill,
+            gstRate,
+            sellerGstNo,
+            customerGstNo,
             items, 
             notes 
         } = req.body;
@@ -104,7 +110,13 @@ export const createOrder = async (req, res) => {
             customerName, 
             customerEmail, 
             customerPhone, 
+            sellerId,
+            sellerName,
             deliveryAddress, 
+            isGstBill,
+            gstRate,
+            sellerGstNo,
+            customerGstNo,
             itemsCount: items?.length, 
             notes 
         });
@@ -188,8 +200,33 @@ export const createOrder = async (req, res) => {
             console.log(`Customer outstanding amount: $${outstandingAmountAtTime}`);
         }
         
-        const totalBilled = itemTotal + outstandingAmountAtTime;
-        const totalAmount = itemTotal; // totalAmount is just items, totalBilled includes outstanding
+        const sellerGst = (sellerGstNo || '').trim();
+        const customerGst = (customerGstNo || '').trim();
+        const gstEnabled = Boolean(isGstBill || sellerGst || customerGst);
+        const normalizedGstRate = gstEnabled ? Math.max(0, Number(gstRate ?? 18)) : 0;
+        const gstAmount = gstEnabled ? Number(((itemTotal * normalizedGstRate) / 100).toFixed(2)) : 0;
+        const totalAmount = itemTotal + gstAmount;
+        const totalBilled = totalAmount + outstandingAmountAtTime;
+
+        let resolvedSellerId = null;
+        let resolvedSellerName = (sellerName || '').trim();
+        if (sellerId) {
+            const sellerUser = await User.findById(sellerId).select('name role');
+            if (!sellerUser) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Selected seller not found'
+                });
+            }
+            if (sellerUser.role === 'customer') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Selected seller cannot be a customer'
+                });
+            }
+            resolvedSellerId = sellerUser._id;
+            resolvedSellerName = sellerUser.name;
+        }
         
         console.log(`Outstanding amount at time: $${outstandingAmountAtTime}`);
         console.log(`Total amount to be billed: $${totalBilled}`);
@@ -201,12 +238,19 @@ export const createOrder = async (req, res) => {
             customerName,
             customerEmail,
             customerPhone,
+            sellerId: resolvedSellerId,
+            sellerName: resolvedSellerName,
             deliveryAddress,
             items: orderItems,
             itemTotal,
             outstandingAmountAtTime,
             totalBilled,
             totalAmount,
+            isGstBill: gstEnabled,
+            gstRate: normalizedGstRate,
+            gstAmount,
+            sellerGstNo: sellerGst,
+            customerGstNo: customerGst,
             paymentStatus: 'unpaid',
             paidAmount: 0,
             billedAt: new Date(),
@@ -313,7 +357,7 @@ export const updateOrderStatus = async (req, res) => {
         await order.save();
 
         const updatedOrder = await Order.findById(id)
-            .select('orderNumber customerId customerName customerEmail customerPhone deliveryAddress items itemTotal outstandingAmountAtTime totalBilled totalAmount paymentStatus paidAmount status orderDate notes createdAt')
+            .select('orderNumber customerId customerName customerEmail customerPhone sellerId sellerName deliveryAddress items itemTotal outstandingAmountAtTime totalBilled totalAmount isGstBill gstRate gstAmount sellerGstNo customerGstNo paymentStatus paidAmount status orderDate billedAt notes createdAt')
             .lean();
 
         await notifyOrderStatusUpdated(updatedOrder);
@@ -339,7 +383,13 @@ export const updateOrderBill = async (req, res) => {
             customerName,
             customerEmail,
             customerPhone,
+            sellerId,
+            sellerName,
             deliveryAddress,
+            isGstBill,
+            gstRate,
+            sellerGstNo,
+            customerGstNo,
             notes,
             items
         } = req.body;
@@ -441,17 +491,50 @@ export const updateOrderBill = async (req, res) => {
 
         const oldTotalBilled = Number(order.totalBilled || order.totalAmount || 0);
         const outstandingAmountAtTime = Number(order.outstandingAmountAtTime || 0);
-        const totalBilled = itemTotal + outstandingAmountAtTime;
+        const sellerGst = (sellerGstNo || '').trim();
+        const customerGst = (customerGstNo || '').trim();
+        const gstEnabled = Boolean(isGstBill || sellerGst || customerGst);
+        const normalizedGstRate = gstEnabled ? Math.max(0, Number(gstRate ?? 18)) : 0;
+        const gstAmount = gstEnabled ? Number(((itemTotal * normalizedGstRate) / 100).toFixed(2)) : 0;
+        const totalAmount = itemTotal + gstAmount;
+        const totalBilled = totalAmount + outstandingAmountAtTime;
+
+        let resolvedSellerId = null;
+        let resolvedSellerName = (sellerName || '').trim();
+        if (sellerId) {
+            const sellerUser = await User.findById(sellerId).select('name role');
+            if (!sellerUser) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Selected seller not found'
+                });
+            }
+            if (sellerUser.role === 'customer') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Selected seller cannot be a customer'
+                });
+            }
+            resolvedSellerId = sellerUser._id;
+            resolvedSellerName = sellerUser.name;
+        }
 
         order.customerName = customerName.trim();
         order.customerEmail = customerEmail.trim().toLowerCase();
         order.customerPhone = customerPhone.trim();
+        order.sellerId = resolvedSellerId;
+        order.sellerName = resolvedSellerName;
         order.deliveryAddress = deliveryAddress.trim();
         order.notes = (notes || '').trim();
         order.items = updatedItems;
         order.itemTotal = itemTotal;
-        order.totalAmount = itemTotal;
+        order.totalAmount = totalAmount;
         order.totalBilled = totalBilled;
+        order.isGstBill = gstEnabled;
+        order.gstRate = normalizedGstRate;
+        order.gstAmount = gstAmount;
+        order.sellerGstNo = sellerGst;
+        order.customerGstNo = customerGst;
         order.billedAt = new Date();
 
         await order.save();
@@ -466,7 +549,7 @@ export const updateOrderBill = async (req, res) => {
         }
 
         const updatedOrder = await Order.findById(order._id)
-            .select('orderNumber customerId customerName customerEmail customerPhone deliveryAddress items itemTotal outstandingAmountAtTime totalBilled totalAmount paymentStatus paidAmount status orderDate billedAt notes createdAt')
+            .select('orderNumber customerId customerName customerEmail customerPhone sellerId sellerName deliveryAddress items itemTotal outstandingAmountAtTime totalBilled totalAmount isGstBill gstRate gstAmount sellerGstNo customerGstNo paymentStatus paidAmount status orderDate billedAt notes createdAt')
             .lean();
 
         res.json({

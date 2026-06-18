@@ -297,7 +297,7 @@ const CustomerOrders = () => {
                         </div>
                         <div>
                           <p className="text-xs text-gray-600 uppercase">Total Amount</p>
-                          <p className="text-lg font-bold text-cyan-700">${order.totalAmount?.toFixed(2) || '0.00'}</p>
+                          <p className="text-lg font-bold text-cyan-700">₹{order.totalAmount?.toFixed(2) || '0.00'}</p>
                         </div>
                         <div>
                           <p className="text-xs text-gray-600 uppercase">Delivery To</p>

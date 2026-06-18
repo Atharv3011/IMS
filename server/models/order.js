@@ -49,6 +49,16 @@ const orderSchema = new mongoose.Schema({
         required: [true, 'Customer phone is required'],
         trim: true
     },
+    sellerId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
+    sellerName: {
+        type: String,
+        default: '',
+        trim: true
+    },
     deliveryAddress: {
         type: String,
         required: [true, 'Delivery address is required']
@@ -73,6 +83,31 @@ const orderSchema = new mongoose.Schema({
         type: Number,
         required: true,
         min: 0
+    },
+    isGstBill: {
+        type: Boolean,
+        default: false
+    },
+    gstRate: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 100
+    },
+    gstAmount: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    sellerGstNo: {
+        type: String,
+        default: '',
+        trim: true
+    },
+    customerGstNo: {
+        type: String,
+        default: '',
+        trim: true
     },
     paymentStatus: {
         type: String,
